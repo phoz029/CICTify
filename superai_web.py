@@ -23,7 +23,19 @@ import time
 # -------------------------
 # --- Configuration ------
 # -------------------------
+# ✅ Automatically find the base folder of this project (works on local + Render)
+BASE_DIR = pathlib.Path(__file__).parent.resolve()
 
+# ✅ GUI directory (for index.html, style.css, script.js, widget.js, etc.)
+GUI_DIR = os.path.join(BASE_DIR, "gui")
+
+# ✅ Static assets (optional images or PDFs, if served separately)
+STATIC_DIR = os.path.join(GUI_DIR, "images")
+
+# ✅ PDF and data files (like manuals or guides)
+PDF_DIR = BASE_DIR  # if your PDFs are stored at the project root
+
+app = Flask(__name__, static_folder=STATIC_DIR)
 # PDF paths
 pdf_paths = [
     r"D:\BulsuAssistant\guide.pdf",
@@ -1021,10 +1033,9 @@ async def init_model_manager():
 def index():
     index_path = os.path.join(GUI_DIR, "index.html")
     if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
-            return render_template_string(f.read())
+        return send_from_directory(GUI_DIR, "index.html")
     return "index.html not found in gui directory", 404
-
+    
 @app.route("/<path:filepath>")
 def serve_file(filepath):
     file_path = os.path.join(GUI_DIR, filepath)
