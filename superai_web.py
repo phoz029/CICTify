@@ -1003,8 +1003,6 @@ Answer (cite document and page):"""
 # --- Flask Web Server ---
 # -------------------------
 
-GUI_DIR = os.path.join("D:" + os.sep, "BulsuAssistant", "gui")
-
 app = Flask(__name__, static_folder=None)
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
