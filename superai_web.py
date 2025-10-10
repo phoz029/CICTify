@@ -1023,14 +1023,13 @@ async def init_model_manager():
                 print("[System] FAISS index loaded into ModelManager")
         except Exception as e:
             print(f"[System] FAISS load error (continuing anyway): {e}")
-@app.route("/")
-def index():
-    index_path = GUI_DIR / "index.html"
-    if index_path.exists():
-        with open(index_path, "r", encoding="utf-8") as f:
-            return render_template_string(f.read())
-    return "index.html not found in gui directory", 404
 
+@app.route("/", methods=["GET", "HEAD"])
+def index():
+    gui_path = Path(GUI_DIR)  # convert to Path if it’s a string
+    index_path = gui_path / "index.html"
+    return send_file(index_path)
+    
 @app.route("/<path:filepath>")
 def serve_file(filepath):
     file_path = os.path.join(GUI_DIR, filepath)
