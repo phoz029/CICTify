@@ -7,7 +7,7 @@ import os
 import threading
 import asyncio
 import aiohttp
-from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from flask import Flask, request, jsonify, send_from_directory, send_file, render_template_string
 from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -1024,11 +1024,13 @@ async def init_model_manager():
         except Exception as e:
             print(f"[System] FAISS load error (continuing anyway): {e}")
 
-@app.route("/", methods=["GET", "HEAD"])
+@app.route("/")
 def index():
-    gui_path = Path(GUI_DIR)  # convert to Path if it’s a string
-    index_path = gui_path / "index.html"
-    return send_file(index_path)
+    index_path = GUI_DIR / "index.html"
+    if index_path.exists():
+        return send_file(index_path)
+    return "index.html not found in gui directory", 404
+
     
 @app.route("/<path:filepath>")
 def serve_file(filepath):
