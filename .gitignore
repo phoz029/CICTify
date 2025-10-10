@@ -1,0 +1,18 @@
+# Ignore virtual environments
+venv/
+.venv/
+env/
+.ollama/
+__pycache__/
+
+# Ignore sensitive files
+.env
+*.json
+
+# Ignore vector store data
+vectorstore/
+*.faiss
+
+# Ignore local IDE settings
+.vscode/
+.idea/
