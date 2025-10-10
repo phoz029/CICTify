@@ -1,7 +1,7 @@
 # superai_web.py
 # Standalone file (AI core + improved CICT webscraper + Flask web server that serves your web GUI)
 # Save at D:\BulsuAssistant\superai_web.py
-
+#test
 import html
 import os
 import threading
@@ -24,17 +24,11 @@ import pathlib
 # -------------------------
 # --- Configuration ------
 # -------------------------
-# ✅ Automatically find the base folder of this project (works on local + Render)
+
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
-
-# ✅ GUI directory (for index.html, style.css, script.js, widget.js, etc.)
 GUI_DIR = os.path.join(BASE_DIR, "gui")
-
-# ✅ Static assets (optional images or PDFs, if served separately)
 STATIC_DIR = os.path.join(GUI_DIR, "images")
-
-# ✅ PDF and data files (like manuals or guides)
-PDF_DIR = BASE_DIR  # if your PDFs are stored at the project root
+PDF_DIR = BASE_DIR 
 
 app = Flask(__name__, static_folder=STATIC_DIR)
 # PDF paths
