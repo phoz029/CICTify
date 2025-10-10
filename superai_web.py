@@ -1066,11 +1066,15 @@ def shutdown():
     return "Shutting down loop", 200
 
 if __name__ == "__main__":
-    print("🚀 Starting CICTify Flask Chatbot (localhost:5000) with JSON Faculty")
+    print("🚀 Starting CICTify Flask Chatbot (Render-Ready Mode) with JSON Faculty")
+
     if not os.path.isdir(GUI_DIR):
         print(f"[WARNING] GUI directory not found: {GUI_DIR}")
+
     try:
         loop.run_until_complete(init_model_manager())
+        port = int(os.environ.get("PORT", 5000))
+        app.run(host="0.0.0.0", port=port)
     except Exception as e:
-        print(f"[WARN] init_model_manager error: {e}")
-    app.run(host="127.0.0.1", port=5000, debug=False)
+        print(f"[ERROR] Failed to start model manager: {e}")
+
