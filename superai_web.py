@@ -21,16 +21,17 @@ from pathlib import Path
 import time
 import pathlib
 
-# -------------------------
-# --- Configuration ------
-# -------------------------
-
+# Base directory (Render-safe)
 BASE_DIR = pathlib.Path(__file__).parent.resolve()
-GUI_DIR = os.path.join(BASE_DIR, "gui")
-STATIC_DIR = os.path.join(GUI_DIR, "images")
-PDF_DIR = BASE_DIR 
 
-app = Flask(__name__, static_folder=STATIC_DIR)
+# GUI paths relative to project root
+GUI_DIR = BASE_DIR / "gui"
+STATIC_DIR = GUI_DIR / "images"
+PDF_DIR = BASE_DIR
+
+print(f"[INFO] BASE_DIR = {BASE_DIR}")
+print(f"[INFO] GUI_DIR = {GUI_DIR}")
+
 # PDF paths
 pdf_paths = [
     r"D:\BulsuAssistant\guide.pdf",
@@ -1026,11 +1027,12 @@ async def init_model_manager():
             print(f"[System] FAISS load error (continuing anyway): {e}")
 @app.route("/")
 def index():
-    index_path = os.path.join(GUI_DIR, "index.html")
-    if os.path.exists(index_path):
-        return send_from_directory(GUI_DIR, "index.html")
+    index_path = GUI_DIR / "index.html"
+    if index_path.exists():
+        with open(index_path, "r", encoding="utf-8") as f:
+            return render_template_string(f.read())
     return "index.html not found in gui directory", 404
-    
+
 @app.route("/<path:filepath>")
 def serve_file(filepath):
     file_path = os.path.join(GUI_DIR, filepath)
