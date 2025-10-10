@@ -1036,6 +1036,11 @@ def serve_file(filepath):
 def serve_images(filename):
     images_dir = os.path.join(GUI_DIR, "images")
     return send_from_directory(images_dir, filename)
+    
+@app.route("/static/<path:filename>")
+def serve_static(filename):
+    static_dir = os.path.join(GUI_DIR, "static")
+    return send_from_directory(static_dir, filename)
 
 @app.route("/chat", methods=["POST"])
 def chat_endpoint():
