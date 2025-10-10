@@ -34,22 +34,22 @@ print(f"[INFO] GUI_DIR = {GUI_DIR}")
 
 # PDF paths
 pdf_paths = [
-    r"D:\BulsuAssistant\guide.pdf",
-    r"D:\BulsuAssistant\BulSU Student handbook.pdf",
-    r"D:\BulsuAssistant\FacultyManual.pdf",
+    str(BASE_DIR / "guide.pdf"),
+    str(BASE_DIR / "BulSU Student handbook.pdf"),
+    str(BASE_DIR / "FacultyManual.pdf"),
 ]
 
-faiss_path = "vectorstore/faiss_index"
+faiss_path = str(BASE_DIR / "vectorstore" / "faiss_index")
+
+FACULTY_JSON_PATH = BASE_DIR / "cict_faculty.json"
+
+FACULTY_CACHE_PATH = Path("cict_faculty_cache.json")
+FACULTY_CACHE_TTL_SECONDS = 24 * 60 * 60  # 1 day
 
 # API keys
 API_KEYS = {
     "groq": os.getenv("GROQ_API_KEY", "")
 }
-
-# CICT faculty JSON file
-FACULTY_JSON_PATH = Path(r"D:\BulsuAssistant\cict_faculty.json")
-FACULTY_CACHE_PATH = Path("cict_faculty_cache.json")
-FACULTY_CACHE_TTL_SECONDS = 24 * 60 * 60  # 1 day
 
 # Load CICT faculty profiles from JSON
 def load_cict_faculty_profiles() -> Dict[str, Dict]:
