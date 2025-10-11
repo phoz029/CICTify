@@ -1,5 +1,5 @@
 # superai_web.py
-# Merged AI core (Groq + Ollama fallback) + CICT webscraper + Flask server (Render-ready)
+# Merged AI core (Groq + Ollama fallback) + improved CICT webscraper + Flask server (Render-ready)
 # Save at project root next to gui/ directory
 
 import os
@@ -20,6 +20,12 @@ from flask import Flask, request, jsonify, send_from_directory, send_file, rende
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from playwright.async_api import async_playwright
+
+# PDF parsing
+try:
+    import PyPDF2
+except Exception:
+    PyPDF2 = None
 
 # -------------------------
 # --- Base / Path config ---
@@ -44,9 +50,11 @@ API_KEYS = {
 
 # PDFs expected in project root (adjust names if necessary)
 pdf_paths = [
-    str(BASE_DIR / "guide.pdf"),
+    str(BASE_DIR / "CICTify - FAQs.pdf"),
     str(BASE_DIR / "BulSU Student handbook.pdf"),
-    str(BASE_DIR / "FacultyManual.pdf"),
+    str(BASE_DIR / "Faculty Manual for BOR.pdf"),
+    str(BASE_DIR / "BulSU-Enhanced-Guidelines.pdf"),
+    str(BASE_DIR / "guide.pdf"),
 ]
 
 faiss_path = str(FAISS_DIR)
@@ -87,6 +95,123 @@ def load_json_safely(path: pathlib.Path) -> Dict:
         except Exception as e:
             print(f"[System] Error reading JSON {path}: {e}")
     return {}
+
+def save_json_safely(path: pathlib.Path, data: Dict):
+    try:
+        with path.open("w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        print(f"[System] Saved JSON to {path}")
+    except Exception as e:
+        print(f"[System] Error saving JSON {path}: {e}")
+
+# -------------------------
+# --- PDF -> Faculty Index helper ---
+# -------------------------
+def extract_text_from_pdf(path: str, max_pages: int = 20) -> str:
+    """Return extracted text from a PDF file (best-effort)."""
+    if PyPDF2 is None:
+        print("[PDF] PyPDF2 not available, skipping PDF parsing.")
+        return ""
+    try:
+        reader = PyPDF2.PdfReader(path)
+        texts = []
+        for i, page in enumerate(reader.pages):
+            if i >= max_pages: break
+            try:
+                texts.append(page.extract_text() or "")
+            except Exception:
+                continue
+        return "\n".join(texts)
+    except Exception as e:
+        print(f"[PDF] Failed to read {path}: {e}")
+        return ""
+
+def heuristically_find_faculty_from_text(text: str, source_label: str = "") -> Dict[str, Dict]:
+    """
+    Heuristic scanner to find 'Dean' and 'Associate Dean' mentions and possible names.
+    Returns dict keyed by guessed name with minimal metadata.
+    """
+    results = {}
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    # join short neighbor lines to increase chance of "Name — Title" patterns
+    joined = []
+    i = 0
+    while i < len(lines):
+        if i + 1 < len(lines) and len(lines[i]) < 30:
+            joined.append(lines[i] + " " + lines[i+1])
+            i += 2
+        else:
+            joined.append(lines[i])
+            i += 1
+
+    patt_title = re.compile(r"(associate\s+dean|associate dean|deputy dean|dean)\b", re.I)
+    # Candidate name pattern: sequences of Title Case words, allow middle initials
+    name_pattern = re.compile(r"([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z\.-]+){0,4})")
+
+    for line in joined:
+        if patt_title.search(line):
+            lower = line.lower()
+            # try to extract name from line
+            # patterns: "Dr. John Doe — Associate Dean" or "Associate Dean: John Doe"
+            # Try "Associate Dean: NAME" first
+            m = re.search(r"(associate\s+dean[:\-\–\—\s]+)(.+)$", line, re.I)
+            if m:
+                name_candidate = m.group(2).strip()
+            else:
+                # try other direction: NAME - Associate Dean
+                m2 = re.search(r"^(.{2,120}?)\s+[-–—:]\s+(associate\s+dean|dean)", line, re.I)
+                if m2:
+                    name_candidate = m2.group(1).strip()
+                else:
+                    # fallback: take first TitleCase sequence
+                    nm = name_pattern.search(line)
+                    name_candidate = nm.group(1).strip() if nm else None
+
+            if not name_candidate:
+                continue
+
+            # clean name candidate: remove trailing commas, titles like PhD
+            name_candidate = re.sub(r",?\s*(Ph\.?D|PhD|DIT|MSIT|MS|MAED|MITM|MSCPE|MSc|Dr\.?)\b.*", "", name_candidate, flags=re.I).strip()
+            # take only first 4 words max
+            name_candidate = " ".join(name_candidate.split()[:4]).strip()
+            if len(name_candidate) < 3:
+                continue
+
+            # normalize title presence
+            title_match = "Associate Dean" if "associate" in lower else "Dean" if "dean" in lower else "Faculty"
+            profile = {
+                "name": name_candidate,
+                "title": title_match,
+                "department": "CICT" if "cict" in lower or "college" in lower else None,
+                "education": None,
+                "certifications": None,
+                "description": None,
+                "url": source_label
+            }
+            results[name_candidate] = profile
+    return results
+
+def build_faculty_index_from_pdfs(pdf_paths_list: List[str]) -> Dict[str, Dict]:
+    """
+    Try to build a minimal faculty index from available PDFs.
+    Returns dict mapping 'Name' -> profile dict.
+    """
+    combined_index = {}
+    for p in pdf_paths_list:
+        if not p or not os.path.exists(p):
+            continue
+        print(f"[PDF] Scanning {p} for faculty entries...")
+        text = extract_text_from_pdf(p, max_pages=40)
+        if not text:
+            continue
+        found = heuristically_find_faculty_from_text(text, source_label=os.path.basename(p))
+        if found:
+            print(f"[PDF] Heuristics found {len(found)} entries in {p}")
+            for name, prof in found.items():
+                # do not overwrite existing more detailed profiles
+                if name not in combined_index:
+                    combined_index[name] = prof
+    return combined_index
 
 # -------------------------
 # --- Cloud / Model API ---
@@ -167,7 +292,13 @@ class CloudAPIManager:
 
 # -------------------------
 # --- CICT Web Crawler ----
+# (kept as-is - omitted HERE in this listing for brevity, but unchanged)
 # -------------------------
+# For brevity I will reuse your existing CICTWebCrawler class below (unchanged)
+# — the full class is the same as in your code above (fetch_page, extract_faculty_profile, crawl_site, etc.)
+# Inserted exactly as in your previous file (kept behavior identical).
+
+# (To keep the response compact I'm re-adding it below exactly)
 class CICTWebCrawler:
     def __init__(self, loop=None):
         self.loop = loop or asyncio.get_event_loop()
@@ -476,6 +607,7 @@ Answer (cite doc and page):"""
         is_academic_query = any(word in lower_msg for word in academic_keywords)
         # name detection against faculty JSON
         name_detected = False
+        matched_profile = None
         if faculty_index:
             for name_key in faculty_index.keys():
                 name_clean = re.sub(r"[^a-z\s]", "", name_key.lower())
@@ -483,6 +615,7 @@ Answer (cite doc and page):"""
                 if sum(1 for t in key_tokens if t in clean_msg) >= 2:
                     name_detected = True
                     matched_profile = faculty_index[name_key]
+                    print(f"[ModelManager] Name detected: {name_key}")
                     break
         is_cict_query = any(word in lower_msg for word in cict_keywords) or name_detected
 
@@ -491,7 +624,7 @@ Answer (cite doc and page):"""
             print("[System] CICT/faculty query detected - using faculty JSON.")
             lower_msg = lower_msg  # already
             # Try name match first
-            if name_detected:
+            if name_detected and matched_profile:
                 p = matched_profile
                 details = []
                 details.append(f"{p.get('name','Unknown')} — {p.get('title','')}")
@@ -635,6 +768,19 @@ async def init_model_manager():
         except Exception as e:
             print(f"[System] FAISS check error: {e}")
 
+        # If faculty JSON doesn't exist, try to build it from PDFs (CICTify - FAQs, etc.)
+        if not FACULTY_JSON_PATH.exists():
+            print("[System] cict_faculty.json not found - attempting to build from PDFs...")
+            built = build_faculty_index_from_pdfs(pdf_paths)
+            if built:
+                try:
+                    save_json_safely(FACULTY_JSON_PATH, built)
+                    print(f"[System] Built faculty JSON with {len(built)} entries.")
+                except Exception as e:
+                    print(f"[System] Could not save built faculty JSON: {e}")
+            else:
+                print("[System] Could not heuristically build faculty index from PDFs.")
+
 # Routes for serving GUI and static files
 @app.route("/")
 def index():
@@ -671,16 +817,6 @@ def chat_endpoint():
     message = extract_message_from_request(data).strip()
     if not message:
         return jsonify({"reply": "Please send a non-empty message."}), 400
-
-    # quick hard-coded debug (keeps old behavior if desired)
-    if "dean" in message.lower() and "cict" in message.lower():
-        # allow quick-return for demo if faculty JSON missing
-        faculty_index = load_json_safely(FACULTY_JSON_PATH)
-        if faculty_index:
-            # will be handled by model_manager logic, but quick path:
-            pass
-        else:
-            return jsonify({"reply": "Based on the latest data from the BulSU CICT faculty pages, the Dean is Dr. Digna Evale, DIT."})
 
     try:
         # ensure model manager created
