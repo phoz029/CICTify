@@ -35,6 +35,7 @@ GUI_DIR = BASE_DIR / "gui"
 STATIC_DIR = GUI_DIR / "images"
 PDF_DIR = BASE_DIR
 FAISS_DIR = BASE_DIR / "vectorstore" / "faiss_index"
+FACULTY_JSON_PATH = BASE_DIR / "cict_faculty.json"
 
 print(f"[INFO] BASE_DIR = {BASE_DIR}")
 print(f"[INFO] GUI_DIR = {GUI_DIR}")
