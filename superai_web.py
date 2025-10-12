@@ -134,7 +134,6 @@ def heuristically_find_faculty_from_text(text: str, source_label: str = "") -> D
     results = {}
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
 
-    # Patterns
     patt_title = re.compile(r"(associate\s+dean|dean|program\s+chair|chairperson|chairman)", re.I)
     name_pattern = re.compile(
         r"(?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\-]+(?:\s+[A-Z][A-Za-z\.-]+){0,3}"
@@ -142,43 +141,33 @@ def heuristically_find_faculty_from_text(text: str, source_label: str = "") -> D
 
     for i, line in enumerate(lines):
         if patt_title.search(line):
-            # Look around the line (previous + next few lines) to catch names split by PDF formatting
             context_window = " ".join(lines[max(0, i - 3): i + 3])
 
-            # Try name BEFORE or AFTER the title
+            # Try to find names before or after title
             m_name = None
-            if re.search(r"(dean|associate\s+dean|program\s+chair|chairperson)", line, re.I):
-                # Match patterns like "Dean John Doe" or "Dr. John Doe - Dean"
-                m_name = re.search(
-                    r"(?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\.-]+(?:\s+[A-Z][A-Za-z\.-]+){0,3}(?=.*\bdean\b)",
-                    context_window,
-                    re.I
-                ) or re.search(
-                    r"(?<=\bdean\b[\s:–—-]+)(?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\.-]+(?:\s+[A-Z][A-Za-z\.-]+){0,3}",
-                    context_window,
-                    re.I
-                )
-
+            # Examples:
+            # "Dean John Doe"
+            m_name = re.search(r"(?:Dean|Associate Dean|Program Chair|Chairperson)\s+((?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\.-]+(?:\s+[A-Z][A-Za-z\.-]+){0,3})", context_window, re.I)
+            # or "Dr. John Doe - Dean"
             if not m_name:
-                m_name = name_pattern.search(context_window)
+                m_name = re.search(r"((?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\.-]+(?:\s+[A-Z][A-Za-z\.-]+){0,3})\s+[-–—:]\s*(Dean|Associate Dean|Program Chair|Chairperson)", context_window, re.I)
 
             if not m_name:
                 continue
 
-            name_candidate = m_name.group(0).strip()
+            name_candidate = m_name.group(1).strip()
             name_candidate = re.sub(r"\s{2,}", " ", name_candidate)
 
-
             # Determine title
+            lower_line = line.lower()
             title = "Dean"
-            if "associate dean" in line.lower():
+            if "associate dean" in lower_line:
                 title = "Associate Dean"
-            elif "program chair" in line.lower():
+            elif "program chair" in lower_line:
                 title = "Program Chair"
-            elif "chairperson" in line.lower():
+            elif "chairperson" in lower_line:
                 title = "Chairperson"
 
-            # Save profile
             results[name_candidate] = {
                 "name": name_candidate,
                 "title": title,
