@@ -3,7 +3,7 @@
   const chatBox = document.createElement("div");
   const chatFrame = document.createElement("iframe");
 
-  // Floating button
+  // Floating button (with subtle pulse effect)
   Object.assign(chatBtn.style, {
     position: "fixed",
     bottom: "20px",
@@ -14,6 +14,8 @@
     borderRadius: "50%",
     cursor: "pointer",
     boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
+    transition: "transform 0.25s ease",
+    animation: "pulse 2s infinite ease-in-out",
   });
   chatBtn.src = "https://cictify.onrender.com/images/floatingCICTify.png";
   chatBtn.alt = "Open CICTify Chat";
@@ -34,7 +36,7 @@
     flexDirection: "column",
   });
 
-  // Embedded chatbot
+  // Embedded chatbot (Render URL)
   chatFrame.src = "https://cictify.onrender.com";
   Object.assign(chatFrame.style, {
     width: "100%",
@@ -48,6 +50,18 @@
 
   // Toggle open/close
   chatBtn.addEventListener("click", () => {
-    chatBox.style.display = chatBox.style.display === "none" ? "flex" : "none";
+    const open = chatBox.style.display === "none";
+    chatBox.style.display = open ? "flex" : "none";
+    chatBtn.style.transform = open ? "scale(0.9)" : "scale(1)";
   });
+
+  // Inject CSS keyframes dynamically
+  const style = document.createElement("style");
+  style.textContent = `
+    @keyframes pulse {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 0 rgba(255,115,0,0.4); }
+      50% { transform: scale(1.05); box-shadow: 0 0 15px rgba(255,115,0,0.6); }
+    }
+  `;
+  document.head.appendChild(style);
 })();
