@@ -838,6 +838,7 @@ def shutdown():
         loop.stop()
     threading.Thread(target=stop_loop, daemon=True).start()
     return "Shutting down loop", 200
+    asyncio.get_event_loop().run_until_complete(init_model_manager())
 
 # Startup
 if __name__ == "__main__":
