@@ -370,3 +370,28 @@ body {
   opacity: 0.6;
   cursor: not-allowed;
 }
+/* 🎤 Mic Button (Voice Input) */
+#mic-btn {
+  position: absolute;
+  right: 55px; /* between input and send */
+  background: none;
+  border: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 50%;
+  transition: background-color 0.2s;
+}
+
+#mic-btn:hover {
+  background: rgba(255, 115, 0, 0.1);
+}
+
+#mic-btn img {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+}
+
