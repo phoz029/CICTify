@@ -45,8 +45,12 @@ async function sendMessage() {
   sendBtn.disabled = true;
   micBtn.disabled = true;
 
-  // Swap send icon → stop icon
-  sendBtn.innerHTML = `<img src="images/stopIcon.png" alt="Stop">`;
+  // Swap send icon → stop emoji instead of missing image
+  sendBtn.innerHTML = "⏹️";
+  sendBtn.style.fontSize = "20px";
+  sendBtn.style.background = "transparent";
+  sendBtn.style.border = "none";
+
 
   const userMsg = document.createElement("div");
   userMsg.classList.add("chat-message", "user-message");
