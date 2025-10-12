@@ -53,9 +53,9 @@ pdf_paths = [
     str(BASE_DIR / "CICTify - FAQs.pdf"),
     str(BASE_DIR / "BulSU Student handbook.pdf"),
     str(BASE_DIR / "Faculty Manual for BOR.pdf"),
-    str(BASE_DIR / "BulSU-Enhanced-Guidelines.pdf"),
-    str(BASE_DIR / "guide.pdf"),
+    str(BASE_DIR / "BulSU-Enhanced-Guidelines.pdf")
 ]
+
 
 faiss_path = str(FAISS_DIR)
 
@@ -767,6 +767,9 @@ async def init_model_manager():
                     print(f"[System] FAISS load failed: {e}")
         except Exception as e:
             print(f"[System] FAISS check error: {e}")
+        # Ensure new PDFs are prioritized in retrieval
+        print("[System] Prioritizing new BulSU and CICT PDFs for retrieval order.")
+        pdf_paths.sort(key=lambda x: "FAQ" not in x)  # make FAQs first
 
         # If faculty JSON doesn't exist, try to build it from PDFs (CICTify - FAQs, etc.)
         if not FACULTY_JSON_PATH.exists():
