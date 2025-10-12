@@ -35,8 +35,6 @@ GUI_DIR = BASE_DIR / "gui"
 STATIC_DIR = GUI_DIR / "images"
 PDF_DIR = BASE_DIR
 FAISS_DIR = BASE_DIR / "vectorstore" / "faiss_index"
-FACULTY_JSON_PATH = BASE_DIR / "cict_faculty.json"
-FACULTY_CACHE_PATH = BASE_DIR / "cict_faculty_cache.json"
 
 print(f"[INFO] BASE_DIR = {BASE_DIR}")
 print(f"[INFO] GUI_DIR = {GUI_DIR}")
@@ -128,68 +126,52 @@ def extract_text_from_pdf(path: str, max_pages: int = 20) -> str:
 
 def heuristically_find_faculty_from_text(text: str, source_label: str = "") -> Dict[str, Dict]:
     """
-    Heuristic scanner to find 'Dean' and 'Associate Dean' mentions and possible names.
-    Returns dict keyed by guessed name with minimal metadata.
+    Improved version: detects proper names before/after Dean, Associate Dean,
+    or Program Chair, even across line breaks. Avoids false matches like
+    'The Dean' without a name.
     """
     results = {}
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    # join short neighbor lines to increase chance of "Name — Title" patterns
-    joined = []
-    i = 0
-    while i < len(lines):
-        if i + 1 < len(lines) and len(lines[i]) < 30:
-            joined.append(lines[i] + " " + lines[i+1])
-            i += 2
-        else:
-            joined.append(lines[i])
-            i += 1
 
-    patt_title = re.compile(r"(associate\s+dean|associate dean|deputy dean|dean)\b", re.I)
-    # Candidate name pattern: sequences of Title Case words, allow middle initials
-    name_pattern = re.compile(r"([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z\.-]+){0,4})")
+    # Patterns
+    patt_title = re.compile(r"(associate\s+dean|dean|program\s+chair|chairperson|chairman)", re.I)
+    name_pattern = re.compile(
+        r"(?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\-]+(?:\s+[A-Z][A-Za-z\.-]+){0,3}"
+    )
 
-    for line in joined:
+    for i, line in enumerate(lines):
         if patt_title.search(line):
-            lower = line.lower()
-            # try to extract name from line
-            # patterns: "Dr. John Doe — Associate Dean" or "Associate Dean: John Doe"
-            # Try "Associate Dean: NAME" first
-            m = re.search(r"(associate\s+dean[:\-\–\—\s]+)(.+)$", line, re.I)
-            if m:
-                name_candidate = m.group(2).strip()
-            else:
-                # try other direction: NAME - Associate Dean
-                m2 = re.search(r"^(.{2,120}?)\s+[-–—:]\s+(associate\s+dean|dean)", line, re.I)
-                if m2:
-                    name_candidate = m2.group(1).strip()
-                else:
-                    # fallback: take first TitleCase sequence
-                    nm = name_pattern.search(line)
-                    name_candidate = nm.group(1).strip() if nm else None
-
-            if not name_candidate:
+            # Look around the line (previous + next few lines) to catch names split by PDF formatting
+            context_window = " ".join(lines[max(0, i - 2): i + 2])
+            m_name = name_pattern.search(context_window)
+            if not m_name:
                 continue
 
-            # clean name candidate: remove trailing commas, titles like PhD
-            name_candidate = re.sub(r",?\s*(Ph\.?D|PhD|DIT|MSIT|MS|MAED|MITM|MSCPE|MSc|Dr\.?)\b.*", "", name_candidate, flags=re.I).strip()
-            # take only first 4 words max
-            name_candidate = " ".join(name_candidate.split()[:4]).strip()
-            if len(name_candidate) < 3:
-                continue
+            name_candidate = m_name.group(0).strip()
+            name_candidate = re.sub(r"\s{2,}", " ", name_candidate)
 
-            # normalize title presence
-            title_match = "Associate Dean" if "associate" in lower else "Dean" if "dean" in lower else "Faculty"
-            profile = {
+            # Determine title
+            title = "Dean"
+            if "associate dean" in line.lower():
+                title = "Associate Dean"
+            elif "program chair" in line.lower():
+                title = "Program Chair"
+            elif "chairperson" in line.lower():
+                title = "Chairperson"
+
+            # Save profile
+            results[name_candidate] = {
                 "name": name_candidate,
-                "title": title_match,
-                "department": "CICT" if "cict" in lower or "college" in lower else None,
+                "title": title,
+                "department": "CICT",
                 "education": None,
                 "certifications": None,
                 "description": None,
                 "url": source_label
             }
-            results[name_candidate] = profile
+
     return results
+
 
 def build_faculty_index_from_pdfs(pdf_paths_list: List[str]) -> Dict[str, Dict]:
     """
@@ -838,7 +820,7 @@ def shutdown():
         loop.stop()
     threading.Thread(target=stop_loop, daemon=True).start()
     return "Shutting down loop", 200
-    asyncio.get_event_loop().run_until_complete(init_model_manager())
+
 
 # Startup
 if __name__ == "__main__":
