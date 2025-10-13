@@ -583,7 +583,8 @@ Answer (cite doc and page):"""
          - Otherwise try FAISS retriever -> Groq RAG -> Groq general -> local fallback
         """
         # load faculty JSON (if available)
-        faculty_index = load_json_safely(FACULTY_JSON_PATH)
+        faculty_index = getattr(self, "cict_faculty", {})
+
 
         lower_msg = question.lower().strip()
         clean_msg = re.sub(r"[^a-z\s]", "", lower_msg)
@@ -738,7 +739,6 @@ app = Flask(__name__, static_folder=None)
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 model_manager: Optional[ModelManager] = None
-
 async def init_model_manager():
     global model_manager
     if model_manager is None:
@@ -761,18 +761,23 @@ async def init_model_manager():
         print("[System] Prioritizing new BulSU and CICT PDFs for retrieval order.")
         pdf_paths.sort(key=lambda x: "FAQ" not in x)  # make FAQs first
 
-        # If faculty JSON doesn't exist, try to build it from PDFs (CICTify - FAQs, etc.)
-        if not FACULTY_JSON_PATH.exists():
-            print("[System] cict_faculty.json not found - attempting to build from PDFs...")
-            built = build_faculty_index_from_pdfs(pdf_paths)
-            if built:
-                try:
-                    save_json_safely(FACULTY_JSON_PATH, built)
-                    print(f"[System] Built faculty JSON with {len(built)} entries.")
-                except Exception as e:
-                    print(f"[System] Could not save built faculty JSON: {e}")
-            else:
-                print("[System] Could not heuristically build faculty index from PDFs.")
+        # ✅ Extract CICT faculty directly from PDF (no JSON)
+        print("[System] Extracting CICT faculty information from PDFs...")
+        faculty_from_pdfs = build_faculty_index_from_pdfs(pdf_paths)
+        if faculty_from_pdfs:
+            print(f"[System] Found {len(faculty_from_pdfs)} possible faculty entries in PDFs.")
+            # Filter only CICT-related ones (based on title or department)
+            cict_faculty = {
+                name: prof for name, prof in faculty_from_pdfs.items()
+                if any(k in (prof.get('title','').lower() + prof.get('department','').lower())
+                           for k in ['cict', 'information', 'communications'])
+            }
+            # Cache it in memory for later queries
+            model_manager.cict_faculty = cict_faculty
+            print(f"[System] Cached {len(cict_faculty)} CICT faculty entries from PDFs.")
+        else:
+            model_manager.cict_faculty = {}
+            print("[System] No faculty data found in PDFs.")
 
 # Routes for serving GUI and static files
 @app.route("/")
