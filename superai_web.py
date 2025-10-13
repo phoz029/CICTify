@@ -14,8 +14,10 @@ import concurrent.futures
 import subprocess
 import platform
 from typing import Optional, List, Dict, Tuple
-
+import torch
 import aiohttp
+from langchain_huggingface import HuggingFaceEmbeddings
+from sentence_transformers import util
 from flask import Flask, request, jsonify, send_from_directory, send_file, render_template_string
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
@@ -125,82 +127,72 @@ def extract_text_from_pdf(path: str, max_pages: int = 20) -> str:
         print(f"[PDF] Failed to read {path}: {e}")
         return ""
 
-def heuristically_find_faculty_from_text(text: str, source_label: str = "") -> Dict[str, Dict]:
+def smart_find_roles(text: str, source_label: str = "") -> Dict[str, Dict]:
     """
-    Improved version: detects proper names before/after Dean, Associate Dean,
-    or Program Chair, even across line breaks. Avoids false matches like
-    'The Dean' without a name.
+    Uses semantic role classification instead of regex-only heuristics.
+    Automatically detects dean, associate dean, program chairs from PDF text.
     """
     results = {}
     lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    if not lines:
+        return results
 
-    patt_title = re.compile(r"(associate\s+dean|dean|program\s+chair|chairperson|chairman)", re.I)
-    name_pattern = re.compile(
-        r"(?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\-]+(?:\s+[A-Z][A-Za-z\.-]+){0,3}"
-    )
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+    model = embeddings.client
+    role_queries = {
+        "Dean": "Who is the Dean of the College of Information and Communications Technology?",
+        "Associate Dean": "Who is the Associate Dean of the College of Information and Communications Technology?",
+        "Program Chair": "Who are the Program Chairs of each program in the College of Information and Communications Technology?"
+    }
 
-    for i, line in enumerate(lines):
-        if patt_title.search(line):
-            context_window = " ".join(lines[max(0, i - 3): i + 3])
+    # Embed all lines and role queries
+    line_embs = model.encode(lines, convert_to_tensor=True, show_progress_bar=False)
+    for role, query in role_queries.items():
+        q_emb = model.encode(query, convert_to_tensor=True)
+        cos_scores = util.pytorch_cos_sim(q_emb, line_embs)[0]
+        top_idx = torch.argmax(cos_scores).item()
+        top_line = lines[top_idx]
+        confidence = cos_scores[top_idx].item()
 
-            # Try to find names before or after title
-            m_name = None
-            # Examples:
-            # "Dean John Doe"
-            m_name = re.search(r"(?:Dean|Associate Dean|Program Chair|Chairperson)\s+((?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\.-]+(?:\s+[A-Z][A-Za-z\.-]+){0,3})", context_window, re.I)
-            # or "Dr. John Doe - Dean"
-            if not m_name:
-                m_name = re.search(r"((?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\.-]+(?:\s+[A-Z][A-Za-z\.-]+){0,3})\s+[-–—:]\s*(Dean|Associate Dean|Program Chair|Chairperson)", context_window, re.I)
+        # if the match is weak (<0.45), skip
+        if confidence < 0.45:
+            continue
 
-            if not m_name:
-                continue
-
-            name_candidate = m_name.group(1).strip()
-            name_candidate = re.sub(r"\s{2,}", " ", name_candidate)
-
-            # Determine title
-            lower_line = line.lower()
-            title = "Dean"
-            if "associate dean" in lower_line:
-                title = "Associate Dean"
-            elif "program chair" in lower_line:
-                title = "Program Chair"
-            elif "chairperson" in lower_line:
-                title = "Chairperson"
-
-            results[name_candidate] = {
-                "name": name_candidate,
-                "title": title,
+        # Try to find a proper name in or near that line
+        name_match = re.search(r"(?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\.\-]+(?:\s+[A-Z][A-Za-z\.\-]+){0,3}", top_line)
+        if not name_match:
+            # fallback: look one line above/below
+            ctx = " ".join(lines[max(0, top_idx-1):min(len(lines), top_idx+2)])
+            name_match = re.search(r"(?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\.\-]+(?:\s+[A-Z][A-Za-z\.\-]+){0,3}", ctx)
+        if name_match:
+            name = name_match.group(0).strip()
+            results[name] = {
+                "name": name,
+                "title": role,
                 "department": "CICT",
-                "education": None,
-                "certifications": None,
-                "description": None,
-                "url": source_label
+                "confidence": round(confidence, 3),
+                "source": source_label
             }
-
     return results
 
 
 def build_faculty_index_from_pdfs(pdf_paths_list: List[str]) -> Dict[str, Dict]:
     """
-    Try to build a minimal faculty index from available PDFs.
-    Returns dict mapping 'Name' -> profile dict.
+    Dynamically builds a faculty index from PDFs (no static JSON).
+    Uses smart_find_roles() for role inference.
     """
     combined_index = {}
     for p in pdf_paths_list:
         if not p or not os.path.exists(p):
             continue
-        print(f"[PDF] Scanning {p} for faculty entries...")
+        print(f"[PDF] Scanning {p} for faculty data...")
         text = extract_text_from_pdf(p, max_pages=40)
         if not text:
             continue
-        found = heuristically_find_faculty_from_text(text, source_label=os.path.basename(p))
+        found = smart_find_roles(text, source_label=os.path.basename(p))
         if found:
-            print(f"[PDF] Heuristics found {len(found)} entries in {p}")
-            for name, prof in found.items():
-                # do not overwrite existing more detailed profiles
-                if name not in combined_index:
-                    combined_index[name] = prof
+            print(f"[PDF] Found {len(found)} faculty roles in {p}")
+            combined_index.update(found)
     return combined_index
 
 # -------------------------
