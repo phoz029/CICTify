@@ -638,7 +638,7 @@ class ModelManager:
     def set_vectorstore(self, vectorstore):
         self.vectorstore = vectorstore
         try:
-            self.retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 9})
+            self.retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 12})
         except Exception as e:
             print(f"[ModelManager] set_vectorstore error: {e}")
 
