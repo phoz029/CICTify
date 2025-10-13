@@ -214,7 +214,7 @@ class CloudAPIManager:
         try:
             session = await self.get_session()
             payload = {
-                "model": "llama-3.3-70b-versatile",
+                "model": "llama-3.1-8b-instant",
                 "messages": [
                     {"role": "system", "content": general_system_prompt},
                     {"role": "user", "content": question}
@@ -245,7 +245,7 @@ class CloudAPIManager:
             system_prompt = rag_system_prompt.format(context=context_text)
             session = await self.get_session()
             payload = {
-                "model": "llama-3.3-70b-versatile",
+                "model": "llama-3.1-8b-instant",
                 "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": question}
