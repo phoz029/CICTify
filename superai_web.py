@@ -22,6 +22,8 @@ from flask import Flask, request, jsonify, send_from_directory, send_file, rende
 from bs4 import BeautifulSoup
 from urllib.parse import urljoin, urlparse
 from playwright.async_api import async_playwright
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS as FAISS_local
 
 # PDF parsing
 try:
@@ -731,40 +733,64 @@ app = Flask(__name__, static_folder=None)
 loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 model_manager: Optional[ModelManager] = None
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import FAISS as FAISS_local
+
 async def init_model_manager():
     global model_manager
     if model_manager is None:
         model_manager = ModelManager(loop)
-        # try loading FAISS vectorstore if present
+
+        embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+        text_splitter = RecursiveCharacterTextSplitter(
+            chunk_size=1000,
+            chunk_overlap=120,
+            separators=["\n\n", "\n", ".", "!", "?", ";"]
+        )
+
+        # Try loading FAISS vectorstore if present
         try:
             if os.path.exists(faiss_path) and os.path.exists(f"{faiss_path}.faiss"):
-                try:
-                    from langchain_huggingface import HuggingFaceEmbeddings
-                    from langchain_community.vectorstores import FAISS as FAISS_local
-                    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-                    db = FAISS_local.load_local(faiss_path, embeddings, allow_dangerous_deserialization=True)
+                db = FAISS_local.load_local(faiss_path, embeddings, allow_dangerous_deserialization=True)
+                model_manager.set_vectorstore(db)
+                print("[System] FAISS index loaded.")
+            else:
+                print("[System] No FAISS found — rebuilding semantic FAISS index from PDFs.")
+                all_texts = []
+                for pdf in pdf_paths:
+                    if os.path.exists(pdf):
+                        text = extract_text_from_pdf(pdf, max_pages=50)
+                        if text.strip():
+                            chunks = text_splitter.split_text(text)
+                            for chunk in chunks:
+                                all_texts.append({"content": chunk, "source_file": os.path.basename(pdf)})
+                if all_texts:
+                    db = FAISS_local.from_texts(
+                        texts=[d["content"] for d in all_texts],
+                        embedding=embeddings,
+                        metadatas=[{"source_file": d["source_file"]} for d in all_texts]
+                    )
+                    os.makedirs(os.path.dirname(faiss_path), exist_ok=True)
+                    db.save_local(faiss_path)
                     model_manager.set_vectorstore(db)
-                    print("[System] FAISS index loaded.")
-                except Exception as e:
-                    print(f"[System] FAISS load failed: {e}")
+                    print(f"[System] FAISS index rebuilt with {len(all_texts)} chunks.")
         except Exception as e:
-            print(f"[System] FAISS check error: {e}")
-        # Ensure new PDFs are prioritized in retrieval
-        print("[System] Prioritizing new BulSU and CICT PDFs for retrieval order.")
-        pdf_paths.sort(key=lambda x: "FAQ" not in x)  # make FAQs first
+            print(f"[System] FAISS load/build error: {e}")
+
+        # Prioritize new PDFs
+        pdf_paths.sort(key=lambda x: "FAQ" not in x)
+        print("[System] Prioritized PDFs (FAQ first).")
 
         # ✅ Extract CICT faculty directly from PDF (no JSON)
         print("[System] Extracting CICT faculty information from PDFs...")
         faculty_from_pdfs = build_faculty_index_from_pdfs(pdf_paths)
         if faculty_from_pdfs:
             print(f"[System] Found {len(faculty_from_pdfs)} possible faculty entries in PDFs.")
-            # Filter only CICT-related ones (based on title or department)
             cict_faculty = {
                 name: prof for name, prof in faculty_from_pdfs.items()
-                if any(k in (prof.get('title','').lower() + prof.get('department','').lower())
+                if any(k in (prof.get('title', '').lower() + prof.get('department', '').lower())
                            for k in ['cict', 'information', 'communications'])
             }
-            # Cache it in memory for later queries
             model_manager.cict_faculty = cict_faculty
             print(f"[System] Cached {len(cict_faculty)} CICT faculty entries from PDFs.")
         else:
