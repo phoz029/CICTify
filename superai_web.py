@@ -31,15 +31,22 @@ try:
 except Exception:
     PyPDF2 = None
 
+# --- Memory control toggle ---
 USE_EMBEDDINGS = os.getenv("USE_EMBEDDINGS", "false").lower() == "true"
+embeddings = None
 
-if USE_EMBEDDINGS:
-    print("[Embeddings] Using HuggingFace local model.")
-    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
-else:
-    print("[Embeddings] Skipping local embedding model (Render-safe mode).")
-    embeddings = None
-
+def get_embeddings():
+    """Lazy-load embeddings only when actually needed"""
+    global embeddings
+    if embeddings is None and USE_EMBEDDINGS:
+        from langchain_community.embeddings import HuggingFaceEmbeddings
+        embeddings = HuggingFaceEmbeddings(
+            model_name="sentence-transformers/paraphrase-MiniLM-L3-v2"
+        )
+        print("[INFO] Embeddings model loaded.")
+    elif not USE_EMBEDDINGS:
+        print("[INFO] Embeddings disabled (Render mode).")
+    return embeddings
 # -------------------------
 # --- Base / Path config ---
 # -------------------------
