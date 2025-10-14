@@ -63,9 +63,11 @@ print(f"[INFO] GUI_DIR = {GUI_DIR}")
 # -------------------------
 # --- Configurable values -
 # -------------------------
+SCRAPERAPI_KEY = os.getenv("SCRAPERAPI_KEY", "")
 API_KEYS = {
-    "groq": os.getenv("GROQ_API_KEY", "")  # set via env
+    "groq": os.getenv("GROQ_API_KEY", "")
 }
+
 # --- Enhanced System Prompts ---
 general_system_prompt = """You are a helpful assistant for Bulacan State University (BulSU).
 
@@ -422,13 +424,23 @@ class CICTWebCrawler:
         # Render-safe version: skip launching Playwright browser
         print("[CICT Crawler] Skipping browser startup on Render.")
         return None
-
-    async def fetch_page(self, url: str):
-        # Render-safe version: completely disable crawling
-        if self.browser is None:
-            print("[CICT Crawler] Disabled on Render environment.")
+async def fetch_page_with_scraperapi(self, url: str) -> str:
+    if not SCRAPERAPI_KEY:
+        print("[WebScrape] No ScraperAPI key set.")
+        return ""
+    api_url = f"https://api.scraperapi.com/?api_key={SCRAPERAPI_KEY}&url={url}&render=true"
+    print(f"[ScraperAPI] Fetching {url}")
+    try:
+        async with aiohttp.ClientSession() as ses:
+            resp = await ses.get(api_url, timeout=20)
+            if resp.status == 200:
+                return await resp.text()
+            print(f"[ScraperAPI error] status {resp.status} for {url}")
             return ""
-        # If you want to keep the real logic for local testing, comment out above and use your normal code here
+    except Exception as e:
+        print(f"[ScraperAPI fetch error]: {e}")
+        return ""
+
 
     def extract_faculty_profile(self, html: str, url: str) -> Optional[Dict]:
         if not html:
@@ -537,7 +549,7 @@ class CICTWebCrawler:
                     continue
                 self.visited.add(url)
                 urls_for_batch.append(url)
-                batch.append(self.fetch_page(url))
+                batch.append(self.fetch_page_with_scraperapi(url))
                 print(f"[CICT Crawler] Queued ({len(self.visited)}/{max_pages}): {url}")
             if not batch:
                 break
