@@ -1,0 +1,5 @@
+[build]
+builder = "railway/buildpacks"
+
+[start]
+cmd = "gunicorn superai_web:app"
