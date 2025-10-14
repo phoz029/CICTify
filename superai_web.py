@@ -31,6 +31,15 @@ try:
 except Exception:
     PyPDF2 = None
 
+USE_EMBEDDINGS = os.getenv("USE_EMBEDDINGS", "false").lower() == "true"
+
+if USE_EMBEDDINGS:
+    print("[Embeddings] Using HuggingFace local model.")
+    embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+else:
+    print("[Embeddings] Skipping local embedding model (Render-safe mode).")
+    embeddings = None
+
 # -------------------------
 # --- Base / Path config ---
 # -------------------------
@@ -403,35 +412,16 @@ class CICTWebCrawler:
         ]
 
     async def start_browser(self):
-        if self.browser is None:
-            self.playwright = await async_playwright().start()
-            self.browser = await self.playwright.chromium.launch(headless=True)
-        return self.browser
+        # Render-safe version: skip launching Playwright browser
+        print("[CICT Crawler] Skipping browser startup on Render.")
+        return None
 
-    async def fetch_page(self, url: str, timeout_ms: int = 20000) -> str:
-        try:
-            browser = await self.start_browser()
-            page = await browser.new_page()
-            try:
-                response = await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
-                if response is None:
-                    print(f"[CICT Crawler] No response for {url}")
-                    return ""
-                content_type = response.headers.get("content-type", "")
-                if "text/html" not in content_type.lower():
-                    print(f"[CICT Crawler] Skipping non-HTML {url} ({content_type})")
-                    return ""
-                html = await page.content()
-                print(f"[CICT Crawler] Fetched {url} (len={len(html)})")
-                return html
-            finally:
-                try:
-                    await page.close()
-                except Exception:
-                    pass
-        except Exception as e:
-            print(f"[CICT Crawler] Error fetching {url}: {e}")
+    async def fetch_page(self, url: str):
+        # Render-safe version: completely disable crawling
+        if self.browser is None:
+            print("[CICT Crawler] Disabled on Render environment.")
             return ""
+        # If you want to keep the real logic for local testing, comment out above and use your normal code here
 
     def extract_faculty_profile(self, html: str, url: str) -> Optional[Dict]:
         if not html:
