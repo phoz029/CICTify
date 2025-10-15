@@ -1,54 +1,57 @@
+/* --- Font Import (Modern Look) --- */
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;600&display=swap');
+
 body {
-  font-family: Arial, sans-serif;
+  font-family: 'Poppins', sans-serif;
   margin: 0;
   padding: 0;
+  background: #ffffff;
 }
 
-/* Chat Widget */
+/* 🦊 Floating Fox Icon Only */
 #chat-icon {
   position: fixed;
-  bottom: 10px;
+  bottom: 20px;
   right: 20px;
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  background: none;
+  padding: 0;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
   cursor: pointer;
-  background: #ff7300;
-  border-radius: 18px;
-  padding: 10px 13px;
   display: flex;
   align-items: center;
-  gap: 0px;
-  box-shadow: 0 4px 8px rgba(0,0,0,0.4);
-  transition: transform 0.2s, box-shadow 0.2s;
-  color: white;
-  font-weight: bold;
+  justify-content: center;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
   z-index: 1000;
 }
 
 #chat-icon:hover {
-  transform: scale(1.05);
-  box-shadow: 0 6px 12px rgba(0,0,0,0.5);
+  transform: scale(1.1);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.4);
 }
 
 #chat-widget {
-  width: 45px;
-  height: 45px;
-  object-fit: contain;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  object-fit: cover;
 }
 
+/* Hide the CICTify text */
 .chat-title {
-  font-size: 18px;
-  font-weight: bold;
-  color: white;
-  margin-left: 2px;
+  display: none;
 }
 
-/* Chatbox */
+/* --- Chatbox with gradient background --- */
 #chatbox {
   position: fixed;
   bottom: 100px;
   right: 20px;
   width: 320px;
   height: 420px;
-  background: #ffffff;
+  background: linear-gradient(to bottom right, #ffffff 60%, #fff5ec 100%);
   border-radius: 15px;
   display: none;
   flex-direction: column;
@@ -65,37 +68,37 @@ body {
   opacity: 1;
   transform: translateY(0);
 }
-
-/* Expanded mode - Header full width, content centered */
+/* 🌐 Expanded mode - Centered large modal (not full screen) */
 #chatbox.expanded {
   position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  max-width: none;
-  border-radius: 0;
-  box-shadow: none;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 85vw;
+  max-width: 900px;
+  height: 85vh;
+  border-radius: 20px;
+  background: linear-gradient(to bottom right, #ffffff 60%, #fff0e0 100%);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.35);
   z-index: 1000;
-  background: #fff;
+  overflow: hidden;
 }
 
-/* Header remains full width in expanded mode */
+/* Header remains full width inside modal */
 #chatbox.expanded #chat-header {
   font-size: 18px;
   padding: 15px 20px;
   border-bottom: 1px solid #ddd;
   width: 100%;
   box-sizing: border-box;
+  border-radius: 20px 20px 0 0;
 }
 
-/* Chat body in expanded mode - centered with limited width */
+/* Chat body inside modal */
 #chatbox.expanded #chat-log {
   flex: 1;
   padding: 20px;
   overflow-y: auto;
-  max-width: 800px;
-  margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
   display: flex;
@@ -103,15 +106,14 @@ body {
   gap: 15px;
 }
 
-/* Input bar in expanded mode - centered */
+/* Input bar inside modal */
 #chatbox.expanded #chat-input-area {
   border-top: 1px solid #ddd;
   padding: 15px 20px;
-  max-width: 800px;
-  margin: 0 auto;
   width: 100%;
   box-sizing: border-box;
 }
+
 
 /* Chat Header */
 #chat-header {
@@ -123,8 +125,20 @@ body {
   border-bottom: 1px solid #ebe9e7;
 }
 
+/* --- Header icon + title --- */
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-icon {
+  width: 22px;
+  height: 22px;
+}
+
 #header-title {
-  font-weight: bold;
+  font-weight: 600;
   font-size: 18px;
   color: #ee6b00;
 }
@@ -159,15 +173,13 @@ body {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  background: #ffffff;
 }
 
-/* User Message - No bubble, with profile icon */
+/* User Message */
 .user-message {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  color: #474747;
   align-self: flex-end;
   flex-direction: row-reverse;
   opacity: 0;
@@ -176,28 +188,26 @@ body {
 }
 
 .user-message img {
-  width: 34px;
-  height: 34px;
-  border-radius: 50%;
-  object-fit: cover;
+  display: none;
 }
 
 .user-message .text {
-  color: #474747;
+  background: #f6921e;
+  color: #ffffff;
+  padding: 10px 14px;
+  border-radius: 20px 20px 0 20px;
   font-size: 14px;
   line-height: 1.4;
   max-width: 230px;
   word-wrap: break-word;
-  padding: 8px 0;
-  margin: 0;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
 }
 
-/* Bot Message - No bubble */
+/* Bot Message */
 .bot-message {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  color: #474747;
   align-self: flex-start;
   opacity: 0;
   transform: translateY(10px);
@@ -209,16 +219,20 @@ body {
   height: 34px;
   border-radius: 50%;
   object-fit: cover;
+  content: url("images/CICTify_ChatLogo.png");
 }
 
 .bot-message .text {
-  color: #474747;
+  background: #ffffff;
+  border: 1px solid #ebe9e7;
+  color: #333;
   font-size: 14px;
   line-height: 1.4;
   max-width: 230px;
   word-wrap: break-word;
-  padding: 8px 0;
-  margin: 0;
+  padding: 10px 14px;
+  border-radius: 20px 20px 20px 0;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.05);
 }
 
 /* Typing Indicator */
@@ -270,7 +284,7 @@ body {
   max-width: 600px;
 }
 
-/* Input Area - Rounded rectangle with send button inside */
+/* Input Area */
 #chat-input-area {
   display: flex;
   align-items: center;
@@ -282,9 +296,9 @@ body {
 
 #chat-input-area input {
   flex: 1;
-  padding: 12px 50px 12px 15px; /* Right padding for send button */
+  padding: 12px 50px 12px 15px;
   border: 1px solid #c4c2c0;
-  border-radius: 25px; /* Rounded rectangle */
+  border-radius: 25px;
   outline: none;
   font-size: 14px;
   color: #6a6765;
@@ -322,6 +336,14 @@ body {
 #send-btn img {
   width: 18px;
   height: 18px;
+  filter: invert(51%) sepia(99%) saturate(679%) hue-rotate(358deg) brightness(101%) contrast(97%);
+  /* makes the icon #f6921e (CICTify orange) */
+  transition: filter 0.2s ease;
+}
+
+#send-btn:hover img {
+  filter: invert(59%) sepia(100%) saturate(740%) hue-rotate(360deg) brightness(103%) contrast(99%);
+  /* slightly brighter orange on hover */
 }
 
 /* Animations */
@@ -358,7 +380,7 @@ body {
   font-size: 13px;
   color: #333;
   cursor: pointer;
-  margin-left: 44px; /* aligns under the bot text */
+  margin-left: 44px;
   transition: background-color 0.2s ease;
 }
 
@@ -370,10 +392,11 @@ body {
   opacity: 0.6;
   cursor: not-allowed;
 }
+
 /* 🎤 Mic Button (Voice Input) */
 #mic-btn {
   position: absolute;
-  right: 55px; /* between input and send */
+  right: 55px;
   background: none;
   border: none;
   cursor: pointer;
@@ -394,4 +417,3 @@ body {
   height: 18px;
   object-fit: contain;
 }
-
