@@ -24,6 +24,12 @@ from urllib.parse import urljoin, urlparse
 from playwright.async_api import async_playwright
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import FAISS as FAISS_local
+from langchain.prompts import PromptTemplate
+from langchain.schema import Document
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_ollama import ChatOllama
+
+
 
 # PDF parsing
 try:
@@ -31,22 +37,6 @@ try:
 except Exception:
     PyPDF2 = None
 
-# --- Memory control toggle ---
-USE_EMBEDDINGS = os.getenv("USE_EMBEDDINGS", "false").lower() == "true"
-embeddings = None
-
-def get_embeddings():
-    """Lazy-load embeddings only when actually needed"""
-    global embeddings
-    if embeddings is None and USE_EMBEDDINGS:
-        from langchain_community.embeddings import HuggingFaceEmbeddings
-        embeddings = HuggingFaceEmbeddings(
-            model_name="sentence-transformers/paraphrase-MiniLM-L3-v2"
-        )
-        print("[INFO] Embeddings model loaded.")
-    elif not USE_EMBEDDINGS:
-        print("[INFO] Embeddings disabled (Render mode).")
-    return embeddings
 # -------------------------
 # --- Base / Path config ---
 # -------------------------
@@ -67,13 +57,13 @@ SCRAPERAPI_KEY = os.getenv("SCRAPERAPI_KEY", "")
 API_KEYS = {
     "groq": os.getenv("GROQ_API_KEY", "")
 }
-
 # --- Enhanced System Prompts ---
 general_system_prompt = """You are a helpful assistant for Bulacan State University (BulSU).
 
 CRITICAL: The university is BULACAN STATE UNIVERSITY (BulSU), NOT Bataan Peninsula State University!
 - Full name: Bulacan State University
 - Abbreviation: BulSU or BSU
+- NEVER entertain questions regarding other topics such as math, science, history, coding, and other general knowledge questions. Entertain only BulSU related queries and greetings.
 
 INTERNAL KNOWLEDGE - BulSU Grading System (use this but don't cite as a "document"):
 BulSU uses an INVERSE grading system where LOWER numbers = BETTER grades:
@@ -100,7 +90,6 @@ For GENERAL questions (greetings, languages, common knowledge, casual chat, simp
 - Answer naturally using your general knowledge
 - For grade comparisons, use the scale above
 - Don't mention "documents" or "sources"
-- STRICTLY don't entertain questions regarding other topics such as math, science, history, coding, and etc. Entertain only BulSU related queries and greetings.
 
 For BulSU-SPECIFIC questions (when you receive context documents):
 - Answer from the provided context
@@ -185,27 +174,6 @@ pdf_paths = [
 
 faiss_path = str(FAISS_DIR)
 
-# -------------------------
-# --- Prompts & Context ---
-# -------------------------
-general_system_prompt = """You are a helpful assistant for Bulacan State University (BulSU).
-
-CRITICAL: The university is BULACAN STATE UNIVERSITY (BulSU).
-
-Be friendly, direct and helpful.""".strip()
-
-rag_system_prompt = """You are an assistant for Bulacan State University (BulSU).
-Use the provided context documents to answer BulSU-specific questions. Cite document name and page if possible.
-
---- CONTEXT ---
-{context}
---- END CONTEXT ---
-
-Answer directly and helpfully.""".strip()
-
-grading_context = """
-BulSU grading system (internal reference): Lower numbers are better (1.00 best, 5.00 failed).
-""".strip()
 
 # -------------------------
 # --- Utility functions ---
@@ -363,49 +331,57 @@ class CloudAPIManager:
             return None
 
     async def call_groq_rag(self, question: str, context_docs: List[Dict], grading_info: str = "") -> Optional[str]:
-        if not API_KEYS.get("groq"):
+        """Call Groq with RAG context for BulSU-specific questions"""
+        if not API_KEYS["groq"]:
             return None
+
         try:
-            context_text = "\n\n".join([f"[{doc.get('source','unknown')}] {doc.get('content','')}" for doc in context_docs])
-            system_prompt = rag_system_prompt.format(context=context_text)
+            # Build context from documents
+            context_text = "\n\n".join([
+                f"[Document: {doc['source']}, Page {doc['page']}]\n{doc['content']}"
+                for doc in context_docs
+            ])
+
+            # Apply grading context if needed
+            grading_section = grading_context if grading_info else ""
+
+            system_prompt = rag_system_prompt.format(
+                grading_context=grading_section,
+                context=context_text
+            )
+
             session = await self.get_session()
-            payload = {
-                "model": "llama-3.1-8b-instant",
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": question}
-                ],
-                "temperature": 1.0,
-                "max_tokens": 2000
-            }
+
             async with session.post(
                     "https://api.groq.com/openai/v1/chat/completions",
-                    headers={"Authorization": f"Bearer {API_KEYS['groq']}", "Content-Type": "application/json"},
-                    json=payload,
-                    timeout=aiohttp.ClientTimeout(total=20)
-            ) as resp:
-                if resp.status == 200:
-                    data = await resp.json()
+                    headers={
+                        "Authorization": f"Bearer {API_KEYS['groq']}",
+                        "Content-Type": "application/json"
+                    },
+                    json={
+                        "model": "llama-3.3-70b-versatile",
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": question}
+                        ],
+                        "temperature": 1.0,
+                        "max_tokens": 2000
+                    },
+                    timeout=aiohttp.ClientTimeout(total=15)
+            ) as response:
+                if response.status == 200:
+                    data = await response.json()
                     return data['choices'][0]['message']['content'].strip()
-                print(f"[Groq RAG] Bad status: {resp.status}")
                 return None
         except Exception as e:
-            print(f"[Groq RAG API error]: {e}")
+            print(f"Groq RAG API error: {e}")
             return None
 
     async def close(self):
         if self.session and not self.session.closed:
             await self.session.close()
 
-# -------------------------
-# --- CICT Web Crawler ----
-# (kept as-is - omitted HERE in this listing for brevity, but unchanged)
-# -------------------------
-# For brevity I will reuse your existing CICTWebCrawler class below (unchanged)
-# — the full class is the same as in your code above (fetch_page, extract_faculty_profile, crawl_site, etc.)
-# Inserted exactly as in your previous file (kept behavior identical).
 
-# (To keep the response compact I'm re-adding it below exactly)
 class CICTWebCrawler:
     def __init__(self, loop=None):
         self.loop = loop or asyncio.get_event_loop()
@@ -421,26 +397,56 @@ class CICTWebCrawler:
         ]
 
     async def start_browser(self):
-        # Render-safe version: skip launching Playwright browser
-        print("[CICT Crawler] Skipping browser startup on Render.")
-        return None
-async def fetch_page_with_scraperapi(self, url: str) -> str:
-    if not SCRAPERAPI_KEY:
-        print("[WebScrape] No ScraperAPI key set.")
-        return ""
-    api_url = f"https://api.scraperapi.com/?api_key={SCRAPERAPI_KEY}&url={url}&render=true"
-    print(f"[ScraperAPI] Fetching {url}")
-    try:
-        async with aiohttp.ClientSession() as ses:
-            resp = await ses.get(api_url, timeout=20)
-            if resp.status == 200:
-                return await resp.text()
-            print(f"[ScraperAPI error] status {resp.status} for {url}")
-            return ""
-    except Exception as e:
-        print(f"[ScraperAPI fetch error]: {e}")
-        return ""
+        if self.browser is None:
+            self.playwright = await async_playwright().start()
+            self.browser = await self.playwright.chromium.launch(headless=True)
+        return self.browser
 
+    async def fetch_page(self, url: str, timeout_ms: int = 20000) -> str:
+        try:
+            browser = await self.start_browser()
+            page = await browser.new_page()
+            try:
+                response = await page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                if response is None:
+                    print(f"[CICT Crawler] No response for {url}")
+                    return ""
+                content_type = response.headers.get("content-type", "")
+                if "text/html" not in content_type.lower():
+                    print(f"[CICT Crawler] Skipping non-HTML {url} ({content_type})")
+                    return ""
+                html = await page.content()
+                print(f"[CICT Crawler] Fetched {url} (len={len(html)})")
+                return html
+            finally:
+                try:
+                    await page.close()
+                except Exception:
+                    pass
+        except Exception as e:
+            print(f"[CICT Crawler] Error fetching {url}: {e}")
+            return ""
+
+    async def fetch_page_scraperapi(self, url: str, timeout: int = 20, render: bool = True) -> str:
+        """Fetch page using ScraperAPI if key is provided. Uses render=true by default for JS pages."""
+        if not SCRAPERAPI_KEY:
+            return ""
+        try:
+            async with aiohttp.ClientSession() as session:
+                render_flag = "true" if render else "false"
+                api_url = f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY}&url={html.escape(url)}&render={render_flag}"
+                headers = {"User-Agent": "cictify-bots/1.0 (+https://example.com)"}
+                async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
+                    text = await resp.text()
+                    if resp.status == 200 and text:
+                        print(f"[ScraperAPI] Got {len(text)} chars from {url}")
+                        return text
+                    else:
+                        print(f"[ScraperAPI] Non-200 {resp.status} for {url} — len={len(text)}")
+                        return ""
+        except Exception as e:
+            print(f"[ScraperAPI] Error fetching {url}: {e}")
+            return ""
 
     def extract_faculty_profile(self, html: str, url: str) -> Optional[Dict]:
         if not html:
@@ -549,7 +555,11 @@ async def fetch_page_with_scraperapi(self, url: str) -> str:
                     continue
                 self.visited.add(url)
                 urls_for_batch.append(url)
-                batch.append(self.fetch_page_with_scraperapi(url))
+                if SCRAPERAPI_KEY:
+                    batch.append(self.fetch_page_scraperapi(url))
+                else:
+                    batch.append(self.fetch_page(url))
+
                 print(f"[CICT Crawler] Queued ({len(self.visited)}/{max_pages}): {url}")
             if not batch:
                 break
@@ -612,53 +622,46 @@ class ModelManager:
         self.loop = loop or asyncio.get_event_loop()
         self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=2)
 
+    def set_vectorstore(self, vectorstore):
+        self.vectorstore = vectorstore
+        self.retriever = vectorstore.as_retriever(
+            search_type="similarity",
+            search_kwargs={"k": 10}
+        )
+
     @staticmethod
     def response_has_no_info(response: str) -> bool:
-        if not response:
-            return True
-        no_info_phrases = [
-            "don't have information", "i couldn't find", "not in my documents",
-            "no information", "couldn't find", "unable to find", "not found"
+        phrases = [
+            "don't have information", "not mentioned", "not found", "couldn't find",
+            "unable to find", "not available", "not in my documents", "no information"
         ]
-        rl = response.lower()
-        return any(p in rl for p in no_info_phrases)
+        return any(p in response.lower() for p in phrases)
 
     async def retrieve_documents(self, question: str) -> List[Dict]:
         if not self.retriever:
             return []
         try:
-            docs = await self.loop.run_in_executor(
-                self.executor,
-                lambda: self.retriever.invoke(question)
-            )
+            docs = await self.loop.run_in_executor(self.executor, lambda: self.retriever.invoke(question))
             formatted = []
-            for d in docs:
+            for doc in docs:
                 formatted.append({
-                    "content": d.page_content,
-                    "source": d.metadata.get("source_file", "local"),
-                    "page": d.metadata.get("page", 0) + 1,
-                    "pdf_path": d.metadata.get("pdf_path", "")
+                    "content": doc.page_content,
+                    "source": doc.metadata.get("source_file", "Unknown"),
+                    "page": doc.metadata.get("page", 0) + 1,
+                    "pdf_path": doc.metadata.get("pdf_path", "")
                 })
             return formatted
         except Exception as e:
-            print(f"[ModelManager] retrieve_documents error: {e}")
+            print(f"[Retrieval error]: {e}")
             return []
-
-    def set_vectorstore(self, vectorstore):
-        self.vectorstore = vectorstore
-        try:
-            self.retriever = vectorstore.as_retriever(search_type="similarity", search_kwargs={"k": 12})
-        except Exception as e:
-            print(f"[ModelManager] set_vectorstore error: {e}")
 
     def load_local_fallback(self):
         if self.local_model is None:
             try:
-                from langchain_ollama import ChatOllama
                 self.local_model = ChatOllama(model="phi3", temperature=0.1)
                 return True
             except Exception as e:
-                print(f"[ModelManager] local model load failed: {e}")
+                print(f"[Local model load failed]: {e}")
                 return False
         return True
 
@@ -666,166 +669,109 @@ class ModelManager:
         if not self.load_local_fallback():
             return None
         try:
-            context_text = "\n\n".join([f"[{d['source']}] {d['content']}" for d in context_docs])
+            context_text = "\n\n".join([f"[{doc['source']}, Page {doc['page']}] {doc['content']}" for doc in context_docs])
             grading_section = grading_context if needs_grading else ""
             prompt = f"""{general_system_prompt}
 
 {grading_section}
 
-Context:
+Context from BulSU documents:
 {context_text}
 
 Question: {question}
 
-Answer (cite doc and page):"""
+Answer (cite document and page):"""
             result = await self.loop.run_in_executor(self.executor, lambda: self.local_model.invoke(prompt))
-            return result.content if hasattr(result, "content") else str(result)
+            return result.content if hasattr(result, 'content') else str(result)
         except Exception as e:
             print(f"[Local RAG error]: {e}")
             return None
 
     async def get_response(self, question: str) -> Tuple[str, List[Dict], str]:
-        """
-        High-level routing:
-         - Use faculty JSON (quick) for faculty queries
-         - Otherwise try FAISS retriever -> Groq RAG -> Groq general -> local fallback
-        """
-        # load faculty JSON (if available)
-        faculty_index = getattr(self, "cict_faculty", {})
-
-
-        lower_msg = question.lower().strip()
-        clean_msg = re.sub(r"[^a-z\s]", "", lower_msg)
-
-        # categorize queries: academic vs cict/faculty
-        academic_keywords = ['grading', 'gwa', 'honor', 'honors', 'grade', 'requirement', 'requirements',
-                             'passing', 'scholarship', 'curriculum', 'student handbook']
-        cict_keywords = ['cict', 'bulsucict', 'college of information', 'faculty', 'professor', 'dean',
-                         'associate dean', 'chair', 'program chair', 'coordinator', 'instructor', 'lecturer']
-
-        is_academic_query = any(word in lower_msg for word in academic_keywords)
-        # name detection against faculty JSON
-        name_detected = False
-        matched_profile = None
-        if faculty_index:
-            for name_key in faculty_index.keys():
-                name_clean = re.sub(r"[^a-z\s]", "", name_key.lower())
-                key_tokens = [t for t in name_clean.split() if len(t) > 2]
-                if sum(1 for t in key_tokens if t in clean_msg) >= 2:
-                    name_detected = True
-                    matched_profile = faculty_index[name_key]
-                    print(f"[ModelManager] Name detected: {name_key}")
-                    break
-        is_cict_query = any(word in lower_msg for word in cict_keywords) or name_detected
-
-        # PRIORITY: faculty queries handled by JSON (fast)
-        if is_cict_query and faculty_index:
-            print("[System] CICT/faculty query detected - using faculty JSON.")
-            lower_msg = lower_msg  # already
-            # Try name match first
-            if name_detected and matched_profile:
-                p = matched_profile
-                details = []
-                details.append(f"{p.get('name','Unknown')} — {p.get('title','')}")
-                if p.get('department'):
-                    details.append(f"Department: {p.get('department')}")
-                if p.get('education'):
-                    details.append(f"Education: {'; '.join(p.get('education')[:6])}")
-                if p.get('certifications'):
-                    details.append(f"Certifications: {'; '.join(p.get('certifications')[:6])}")
-                if p.get('description'):
-                    details.append(f"About: {p.get('description')}")
-                if p.get('url'):
-                    details.append(f"Profile: {p.get('url')}")
-                return "\n".join(details), [], "JSON CICT"
-            # role matching
-            roles = {
-                "dean": [p for p in faculty_index.values() if p.get('title') and 'dean' in p['title'].lower() and 'associate' not in p['title'].lower()],
-                "associate dean": [p for p in faculty_index.values() if p.get('title') and 'associate' in p['title'].lower() and 'dean' in p['title'].lower()],
-            }
-            for role, matches in roles.items():
-                if re.search(rf"\b{role}\b", lower_msg):
-                    if matches:
-                        if len(matches) == 1:
-                            top = matches[0]
-                            reply = f"{top.get('name','Unknown')} — {top.get('title','')}"
-                            if top.get('url'):
-                                reply += f" Profile: {top.get('url')}"
-                            return reply, [], "JSON CICT"
-                        else:
-                            return "Matches:\n" + "\n".join([m.get("name","") for m in matches]), [], "JSON CICT"
-            # list faculty
-            if "list" in lower_msg or "who are" in lower_msg or "all faculty" in lower_msg:
-                names = [p.get('name','') for p in faculty_index.values()]
-                return "CICT Faculty:\n" + "\n".join(f"- {n}" for n in names), [], "JSON CICT"
-            # otherwise fallback to scraping non-faculty or FAISS
-            # try FAISS/RAG
-            context_docs = await self.retrieve_documents(question)
-            if not context_docs:
-                print("[System] No cached CICT data - scraping non-faculty pages (fallback).")
-                crawler = CICTWebCrawler(self.loop)
-                _, scraped_texts = await crawler.crawl_site("https://bulsucict.com", max_pages=20)
-                if scraped_texts:
-                    context_docs = [{"content": t, "source": u, "page": 1} for (u, t) in scraped_texts]
-            if context_docs:
-                resp = await self.cloud_api.call_groq_rag(question, context_docs[:6])
-                if resp:
-                    return resp, [], "Groq (CICT Non-Faculty)"
-            # fallback to general
-            print("[System] No faculty data matched — falling back to general RAG/General.")
-            response = await self.cloud_api.call_groq_general(question)
-            if response:
-                return response, [], "Groq (General - fallback)"
-        # Non-faculty queries: use QueryClassifier rules to decide RAG vs general
         use_rag = QueryClassifier.needs_rag(question)
         print(f"[ModelManager] Question: '{question}' | Use RAG: {use_rag}")
+
         if not use_rag:
-            # Groq general
             response = await self.cloud_api.call_groq_general(question)
             if response:
                 return response, [], "Groq (General)"
-            # local fallback
             if self.load_local_fallback():
-                try:
-                    result = await self.loop.run_in_executor(self.executor, lambda: self.local_model.invoke(question))
-                    return (result.content if hasattr(result, "content") else str(result)), [], "Local (General)"
-                except Exception as e:
-                    print(f"[ModelManager] local general error: {e}")
+                result = await self.loop.run_in_executor(self.executor, lambda: self.local_model.invoke(question))
+                return (result.content if hasattr(result, "content") else str(result)), [], "Local (General)"
             return "I'm having trouble responding. Please try again.", [], "Error"
-        else:
-            # RAG flow: retrieve docs -> call Groq RAG -> local RAG fallback
-            context_docs = await self.retrieve_documents(question)
-            if not context_docs:
-                # attempt Groq general as fallback
-                response = await self.cloud_api.call_groq_general(question)
-                if response:
-                    return response, [], "Groq (General fallback)"
-                return "I couldn't find relevant information in my documents. Could you rephrase your question?", [], "No Results"
-            needs_grading = any(w in lower_msg for w in ['gwa', 'grade', 'grading', 'honor', 'honours'])
-            response = await self.cloud_api.call_groq_rag(question, context_docs, grading_info="yes" if needs_grading else "")
+
+        context_docs = await self.retrieve_documents(question)
+        if not context_docs:
+            response = await self.cloud_api.call_groq_general(question)
             if response:
-                if self.response_has_no_info(response):
-                    return response, [], "Groq (RAG - No info)"
-                return response, context_docs, "Groq (RAG)"
-            # local RAG fallback
-            response = await self.get_local_rag_response(question, context_docs, needs_grading)
-            if response:
-                if self.response_has_no_info(response):
-                    return response, [], "Local (RAG - No info)"
-                return response, context_docs, "Local (RAG)"
-            return "I cannot process your request at this time.", [], "Error"
+                return response, [], "Groq (General - No docs)"
+            return "I couldn't find relevant information in my documents. Could you rephrase your question?", [], "No Results"
+
+        grading_keywords = ['gwa', 'grade', 'grading', 'shift', 'transfer',
+                            'requirement', 'eligible', 'at least', 'passing']
+        needs_grading = any(kw in question.lower() for kw in grading_keywords)
+
+        response = await self.cloud_api.call_groq_rag(question, context_docs, grading_info="yes" if needs_grading else "")
+        if response:
+            if self.response_has_no_info(response):
+                return response, [], "Groq (RAG - No info)"
+            return response, context_docs, "Groq (RAG)"
+
+        response = await self.get_local_rag_response(question, context_docs, needs_grading)
+        if response:
+            if self.response_has_no_info(response):
+                return response, [], "Local (RAG - No info)"
+            return response, context_docs, "Local (RAG)"
+
+        return "I cannot process your request at this time.", [], "Error"
 
 # -------------------------
 # --- QueryClassifier -----
 # -------------------------
 class QueryClassifier:
+    """Determines if query needs RAG or general knowledge"""
+
+    # Keywords that indicate BulSU-specific queries
     BULSU_KEYWORDS = [
-        'bulsu', 'bulacan state', 'university', 'bsu', 'mission', 'vision', 'history', 'campus',
-        'gwa', 'grade', 'grading', 'dean', 'faculty', 'student handbook', 'honor', 'honours'
+        # Institution
+        'bulsu', 'bulacan state', 'university', 'bsu',
+        'mission', 'vision', 'core values', 'mandate',
+        'history', 'established', 'founded', 
+        # Campus & Location
+        'campus', 'campuses', 'location', 'address', 'where',
+        'malolos', 'bustos', 'san jose', 'hagonoy', 'matungao',
+        # Offices & Units
+        'osoa', 'osa', 'registrar', 'cashier', 'library',
+        'office of student affairs', 'student affairs',
+        'accounting', 'budget', 'hrmo', 'planning',
+        # Academic
+        'gwa', 'grade', 'grading', 'credit', 'unit', 'course', 'subject',
+        'enroll', 'enrollment', 'registration', 'curriculum', 'syllabus',
+        'shift', 'transfer', 'shifter', 'transferee',
+        'exam', 'midterm', 'final', 'quiz', 'requirement',
+        'dean', 'professor', 'faculty', 'instructor',
+        # Policies & Procedures
+        'policy', 'policies', 'rule', 'regulation', 'procedure',
+        'requirement', 'requirements', 'eligibility', 'qualified',
+        'petition', 'appeal', 'clearance', 'document',
+        'scholarship', 'financial aid', 'tuition', 'fee',
+        'admission', 'graduate', 'graduation', 'honors',
+        # Student life
+        'student handbook', 'code of conduct', 'discipline',
+        'organization', 'club', 'facility',
+        'laboratory', 'clinic',
+        # Administrative
+        'office', 'department', 'college', 'program',
+        'bachelor', 'master', 'major', 'minor'
+        # CICT-specific
+        'cict', 'information and communications technology', 'information technology', 'bsit', 'specialization', 'track'
     ]
+
+    # Patterns for greetings and casual conversation
     CASUAL_PATTERNS = [
         r'^hi+$', r'^hello+$', r'^hey+$', r'^good\s+(morning|afternoon|evening)',
-        r'^how\s+are\s+you', r'^what\'?s\s+up', r'^thanks?', r'^bye', r'^goodbye'
+        r'^how\s+are\s+you', r'^what\'?s\s+up', r'^sup+$',
+        r'^thank', r'^bye', r'^goodbye', r'^see\s+you'
     ]
 
     @classmethod
@@ -834,8 +780,28 @@ class QueryClassifier:
         for p in cls.CASUAL_PATTERNS:
             if re.match(p, q):
                 return False
+           
+        simple_comparison_patterns = [
+            r'which.*better.*\d\.\d+.*\d\.\d+',
+            r'better.*\d\.\d+.*or.*\d\.\d+',
+            r'compare.*\d\.\d+.*\d\.\d+',
+            r'^\d\.\d+.*or.*\d\.\d+.*better',
+            r'^is.*\d\.\d+.*better.*than.*\d\.\d+'
+        ]
+        for pattern in simple_comparison_patterns:
+            if re.search(pattern, q):
+                return False
+       
         # "grading system" explicitly should not always trigger RAG (we prefer general)
-        if re.match(r'^(what is |explain )?(the )?(bulsu )?grading system\??$', q):
+        if re.match(r'^(what is |explain |tell me about )?(the )?(bulsu )?grading system\??$', q):
+            return False
+        priority_keywords = ['mission', 'vision', 'campus', 'office', 'osoa',
+                             'location', 'where', 'address', 'established', 'history']
+        if any(kw in q for kw in priority_keywords):
+            return True
+
+        # Very short questions are usually casual
+        if len(question.split()) <= 2 and not any(kw in q for kw in cls.BULSU_KEYWORDS):
             return False
         # otherwise if contains BulSU keywords -> RAG
         return any(k in q for k in cls.BULSU_KEYWORDS)
