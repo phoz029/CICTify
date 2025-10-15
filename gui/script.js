@@ -55,7 +55,7 @@ async function sendMessage() {
   const userMsg = document.createElement("div");
   userMsg.classList.add("chat-message", "user-message");
   userMsg.innerHTML = `
-    <img src="images/userIcon.png" alt="User Avatar">
+    <img src="images/CICTify_ChatLogo.png" alt="User Avatar">
     <div class="text">${message}</div>
   `;
   chatLog.appendChild(userMsg);
