@@ -107,7 +107,6 @@ YOUR APPROACH:
 2. Answer who/where/when/what/why questions directly and helpfully
 3. Extract relevant information even if not explicitly stated
 4. Be natural and conversational in your answers
-5. Always cite your sources (PDF name and page)
 
 CITATION RULES:
 1. Answer using the CONTEXT DOCUMENTS section below
@@ -116,7 +115,6 @@ CITATION RULES:
 4. Always mention which PDF document (filename) and page number
 5. If answer not in context documents, say "I don't have information about that in my documents"
 6. If one source already satisfied the requirements, just cite that one source.
-7. Cite only the sources where you actually got the information or the basis for your reasoning.
 
 --- GRADING REFERENCE (YOUR INTERNAL KNOWLEDGE - DO NOT CITE THIS) ---
 {grading_context}
@@ -427,27 +425,6 @@ class CICTWebCrawler:
             print(f"[CICT Crawler] Error fetching {url}: {e}")
             return ""
 
-    async def fetch_page_scraperapi(self, url: str, timeout: int = 20, render: bool = True) -> str:
-        """Fetch page using ScraperAPI if key is provided. Uses render=true by default for JS pages."""
-        if not SCRAPERAPI_KEY:
-            return ""
-        try:
-            async with aiohttp.ClientSession() as session:
-                render_flag = "true" if render else "false"
-                api_url = f"http://api.scraperapi.com?api_key={SCRAPERAPI_KEY}&url={html.escape(url)}&render={render_flag}"
-                headers = {"User-Agent": "cictify-bots/1.0 (+https://example.com)"}
-                async with session.get(api_url, headers=headers, timeout=aiohttp.ClientTimeout(total=timeout)) as resp:
-                    text = await resp.text()
-                    if resp.status == 200 and text:
-                        print(f"[ScraperAPI] Got {len(text)} chars from {url}")
-                        return text
-                    else:
-                        print(f"[ScraperAPI] Non-200 {resp.status} for {url} — len={len(text)}")
-                        return ""
-        except Exception as e:
-            print(f"[ScraperAPI] Error fetching {url}: {e}")
-            return ""
-
     def extract_faculty_profile(self, html: str, url: str) -> Optional[Dict]:
         if not html:
             return None
@@ -555,11 +532,7 @@ class CICTWebCrawler:
                     continue
                 self.visited.add(url)
                 urls_for_batch.append(url)
-                if SCRAPERAPI_KEY:
-                    batch.append(self.fetch_page_scraperapi(url))
-                else:
-                    batch.append(self.fetch_page(url))
-
+                batch.append(self.fetch_page(url))
                 print(f"[CICT Crawler] Queued ({len(self.visited)}/{max_pages}): {url}")
             if not batch:
                 break
@@ -915,7 +888,18 @@ def chat_endpoint():
         # ensure model manager created
         loop.run_until_complete(init_model_manager())
         response, sources, model_name = loop.run_until_complete(model_manager.get_response(message))
-        return jsonify({"reply": response, "sources": sources, "model": model_name})
+        # 🧹 Clean up citations and document mentions
+        clean_response = re.sub(
+            r'(\(?\s*(as\s+mentioned\s+in|according\s+to|based\s+on)\s+(the\s+)?(document|file|pdf)?[^.,)]*(\.pdf)?(,?\s*Page\s*\d+)?\)?[.,]?)',
+            '',
+            response,
+            flags=re.IGNORECASE
+        )
+        clean_response = re.sub(r'\s*\([^)]*\.pdf[^)]*\)', '', clean_response)  # removes any remaining (…pdf…)
+        clean_response = re.sub(r'\s{2,}', ' ', clean_response).strip()         # remove double spaces
+
+        return jsonify({"reply": clean_response})
+
     except aiohttp.ClientConnectorError:
         return jsonify({"reply": "⚠️ Unable to connect to remote API. Running in offline mode."})
     except Exception as e:
