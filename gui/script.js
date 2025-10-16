@@ -2,12 +2,36 @@ const userInput = document.getElementById("user-input");
 const sendBtn = document.getElementById("send-btn");
 const micBtn = document.getElementById("mic-btn");
 const chatbox = document.getElementById("chatbox");
-const chatLog = document.getElementById("chat-log");
 const expandBtn = document.getElementById("expand-btn");
 
 let abortController = null;
 let recognizing = false;
 let recognition;
+
+document.addEventListener("DOMContentLoaded", () => {
+  const chatLogEl = document.getElementById("chat-log");
+  if (!chatLogEl) return;
+
+
+
+  const hours = new Date().getHours();
+  const timeGreeting =
+    hours < 12 ? "Good morning" :
+    hours < 18 ? "Good afternoon" :
+    "Good evening";
+
+  const botMsg = document.createElement("div");
+  botMsg.classList.add("chat-message", "bot-message");
+  botMsg.innerHTML = `
+    <img src="images/CICTify_ChatLogo.png" alt="Bot Avatar">
+    <div class="text">👋 ${timeGreeting}! I’m your CICT Chatbot. How can I help you today?</div>
+  `;
+
+  setTimeout(() => {
+    chatLogEl.appendChild(botMsg);
+    chatLogEl.scrollTop = chatLogEl.scrollHeight;
+  }, 150);
+});
 
 // Toggle chatbox visibility
 function toggleChat() {
@@ -26,6 +50,7 @@ function showTypingIndicator() {
       <div class="typing-dot"></div>
     </div>
   `;
+  const chatLog = document.getElementById("chat-log");
   chatLog.appendChild(typingIndicator);
   chatLog.scrollTop = chatLog.scrollHeight;
   return typingIndicator;
@@ -37,6 +62,7 @@ function hideTypingIndicator(typingIndicator) {
 
 // ---- Main Send Message ----
 async function sendMessage() {
+  const chatLog = document.getElementById("chat-log");
   const message = userInput.value.trim();
   if (message === "") return;
 
@@ -45,12 +71,10 @@ async function sendMessage() {
   sendBtn.disabled = true;
   micBtn.disabled = true;
 
-  // Swap send icon → stop emoji instead of missing image
   sendBtn.innerHTML = "⏹️";
   sendBtn.style.fontSize = "20px";
   sendBtn.style.background = "transparent";
   sendBtn.style.border = "none";
-
 
   const userMsg = document.createElement("div");
   userMsg.classList.add("chat-message", "user-message");
@@ -87,7 +111,7 @@ async function sendMessage() {
       <div class="text">${botReply}</div>
     `;
 
-    // 🔊 TTS “Listen” button
+    // 🔊 Listen button
     const listenBtn = document.createElement("button");
     listenBtn.textContent = "🔊 Listen";
     listenBtn.className = "tts-btn";
@@ -105,33 +129,31 @@ async function sendMessage() {
     chatLog.scrollTop = chatLog.scrollHeight;
   } catch (error) {
     hideTypingIndicator(typingIndicator);
+    const botMsg = document.createElement("div");
+    botMsg.classList.add("chat-message", "bot-message");
+
     if (error.name === "AbortError") {
-      const botMsg = document.createElement("div");
-      botMsg.classList.add("chat-message", "bot-message");
       botMsg.innerHTML = `
         <img src="images/CICTify_ChatLogo.png" alt="Bot Avatar">
         <div class="text">🛑 Query stopped by user.</div>
       `;
-      chatLog.appendChild(botMsg);
     } else {
       console.error("Error sending message:", error);
-      const botMsg = document.createElement("div");
-      botMsg.classList.add("chat-message", "bot-message");
       botMsg.innerHTML = `
         <img src="images/CICTify_ChatLogo.png" alt="Bot Avatar">
         <div class="text">⚠️ Server not responding. Please check your Flask app.</div>
       `;
-      chatLog.appendChild(botMsg);
     }
+    chatLog.appendChild(botMsg);
     chatLog.scrollTop = chatLog.scrollHeight;
   } finally {
-    // Reset
-    userInput.disabled = false;
-    sendBtn.disabled = false;
-    micBtn.disabled = false;
-    sendBtn.innerHTML = `<img src="images/sendIcon.png" alt="Send">`;
-    abortController = null;
-  }
+  userInput.disabled = false;
+  sendBtn.disabled = false;
+  micBtn.disabled = false;
+  sendBtn.innerHTML = `<img src="images/sendIcon.png" alt="Send">`;
+  abortController = null;
+}
+
 }
 
 // ---- Stop Button ----
@@ -146,10 +168,32 @@ sendBtn.addEventListener("click", () => {
 });
 
 // ---- Voice Input ----
+const correctionMap = {
+  "bull sue": "BULSU",
+  "bull zoo": "BULSU",
+  "bulsu": "BULSU",
+  "bull shoe": "BULSU",
+  "bulls you": "BULSU",
+  "ci ct": "CICT",
+  "see ict": "CICT",
+  "ci ctify": "CICTify",
+  "bulsu cict": "BULSU CICT",
+  "bulsu site": "BULSU CICT"
+};
+
+function correctTranscript(text) {
+  let corrected = text.toLowerCase();
+  for (const [wrong, right] of Object.entries(correctionMap)) {
+    const pattern = new RegExp(`\\b${wrong}\\b`, "gi");
+    corrected = corrected.replace(pattern, right);
+  }
+  return corrected.charAt(0).toUpperCase() + corrected.slice(1);
+}
+
 if ("webkitSpeechRecognition" in window) {
   recognition = new webkitSpeechRecognition();
   recognition.continuous = false;
-  recognition.lang = "en-PH";
+  recognition.lang = "en-US";
   recognition.interimResults = false;
 
   recognition.onstart = () => {
@@ -158,8 +202,10 @@ if ("webkitSpeechRecognition" in window) {
   };
 
   recognition.onresult = (event) => {
-    const transcript = event.results[0][0].transcript;
-    userInput.value = transcript;
+    let transcript = event.results[0][0].transcript;
+    const corrected = correctTranscript(transcript);
+    console.log(`🎙️ Heard: "${transcript}" → Corrected: "${corrected}"`);
+    userInput.value = corrected;
     sendMessage();
   };
 
@@ -175,12 +221,23 @@ if ("webkitSpeechRecognition" in window) {
 }
 
 micBtn.addEventListener("click", () => {
-  if (recognizing) {
-    recognition.stop();
+  try {
+    if (!recognition) {
+      alert("Voice recognition not supported in this browser.");
+      return;
+    }
+
+    if (recognizing) {
+      recognition.stop();
+      micBtn.innerHTML = `<img src="images/micIcon.png" alt="Voice">`;
+      recognizing = false;
+    } else {
+      recognition.start();
+    }
+  } catch (err) {
+    console.error("🎤 Voice recognition error:", err);
     micBtn.innerHTML = `<img src="images/micIcon.png" alt="Voice">`;
     recognizing = false;
-  } else {
-    recognition.start();
   }
 });
 
