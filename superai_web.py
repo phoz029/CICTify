@@ -53,9 +53,8 @@ print(f"[INFO] GUI_DIR = {GUI_DIR}")
 # -------------------------
 # --- Configurable values -
 # -------------------------
-SCRAPERAPI_KEY = os.getenv("SCRAPERAPI_KEY", "")
 API_KEYS = {
-    "groq": os.getenv("GROQ_API_KEY", "")
+   
 }
 # --- Enhanced System Prompts ---
 general_system_prompt = """You are a helpful assistant for Bulacan State University (BulSU).
@@ -244,11 +243,14 @@ def smart_find_roles(text: str, source_label: str = "") -> Dict[str, Dict]:
         top_line = lines[top_idx]
         confidence = cos_scores[top_idx].item()
 
+        # if the match is weak (<0.45), skip
         if confidence < 0.45:
             continue
 
+        # Try to find a proper name in or near that line
         name_match = re.search(r"(?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\.\-]+(?:\s+[A-Z][A-Za-z\.\-]+){0,3}", top_line)
         if not name_match:
+            # fallback: look one line above/below
             ctx = " ".join(lines[max(0, top_idx-1):min(len(lines), top_idx+2)])
             name_match = re.search(r"(?:Dr\.|Mr\.|Ms\.|Mrs\.)?\s*[A-Z][A-Za-z\.\-]+(?:\s+[A-Z][A-Za-z\.\-]+){0,3}", ctx)
         if name_match:
@@ -330,11 +332,13 @@ class CloudAPIManager:
             return None
 
         try:
+            # Build context from documents
             context_text = "\n\n".join([
                 f"[Document: {doc['source']}, Page {doc['page']}]\n{doc['content']}"
                 for doc in context_docs
             ])
 
+            # Apply grading context if needed
             grading_section = grading_context if grading_info else ""
 
             system_prompt = rag_system_prompt.format(
@@ -451,6 +455,7 @@ class CICTWebCrawler:
                 if len(t) < 140 and any(k in tl for k in ["dean", "associate", "chair", "program", "faculty", "coordinator", "head", "director", "professor", "lecturer", "instructor"]):
                     title_candidates.append(t)
         profile["title"] = title_candidates[0] if title_candidates else None
+        # department heuristics
         dept = None
         for label in ["department", "college", "program", "division"]:
             found = soup.find(string=lambda s: s and label in s.lower())
@@ -461,6 +466,7 @@ class CICTWebCrawler:
                     dept = dept_text
                     break
         profile["department"] = dept
+        # Education heuristics
         education = []
         edu_headers = soup.find_all(lambda tag: tag.name in ["h3", "h4", "strong"] and "educat" in tag.get_text().lower())
         if edu_headers:
@@ -478,6 +484,7 @@ class CICTWebCrawler:
                     education.append(line.strip())
             education = education[:6]
         profile["education"] = education if education else None
+        # certifications
         certs = []
         for s in soup.find_all(string=lambda t: t and "certificate" in t.lower()):
             parent = s.parent
@@ -485,6 +492,7 @@ class CICTWebCrawler:
                 text = parent.get_text(" ", strip=True)
                 certs.append(text)
         profile["certifications"] = certs if certs else None
+        # description
         paragraphs = [p.get_text(" ", strip=True) for p in soup.find_all("p")]
         description = ""
         for para in paragraphs:
@@ -532,16 +540,18 @@ class CICTWebCrawler:
                 if isinstance(result, Exception) or not result:
                     print(f"[CICT Crawler] Failed or empty for {url}")
                     continue
+                # If faculty profile url, try to extract into profiles list
                 if self.is_faculty_profile_url(url):
                     prof = self.extract_faculty_profile(result, url)
                     if prof:
                         scraped_profiles.append((url, prof))
                         continue
-
+                # otherwise save page text
                 soup = BeautifulSoup(result, "html.parser")
                 for tag in soup(["script", "style", "noscript", "nav", "footer", "header"]):
                     tag.decompose()
                 scraped_texts.append((url, soup.get_text(" ", strip=True)[:4000]))
+                # find links to expand
                 try:
                     soup2 = BeautifulSoup(result, "html.parser")
                     for a in soup2.find_all("a", href=True):
@@ -753,14 +763,18 @@ class QueryClassifier:
             if re.search(pattern, q):
                 return False
        
+        # "grading system" explicitly should not always trigger RAG (we prefer general)
         if re.match(r'^(what is |explain |tell me about )?(the )?(bulsu )?grading system\??$', q):
             return False
         priority_keywords = ['mission', 'vision', 'campus', 'office', 'osoa',
                              'location', 'where', 'address', 'established', 'history']
         if any(kw in q for kw in priority_keywords):
             return True
+
+        # Very short questions are usually casual
         if len(question.split()) <= 2 and not any(kw in q for kw in cls.BULSU_KEYWORDS):
             return False
+        # otherwise if contains BulSU keywords -> RAG
         return any(k in q for k in cls.BULSU_KEYWORDS)
 
 # -------------------------
@@ -811,11 +825,11 @@ async def init_model_manager():
         except Exception as e:
             print(f"[System] FAISS load/build error: {e}")
 
-
+        # Prioritize new PDFs
         pdf_paths.sort(key=lambda x: "FAQ" not in x)
         print("[System] Prioritized PDFs (FAQ first).")
 
-
+        # ✅ Extract CICT faculty directly from PDF (no JSON)
         print("[System] Extracting CICT faculty information from PDFs...")
         faculty_from_pdfs = build_faculty_index_from_pdfs(pdf_paths)
         if faculty_from_pdfs:
@@ -846,20 +860,21 @@ def serve_images(filename):
 
 @app.route("/<path:filepath>")
 def serve_file(filepath):
+    # serve any file inside gui directory (css/js/widget)
     file_path = GUI_DIR / filepath
     if file_path.exists() and file_path.is_file():
         return send_from_directory(str(GUI_DIR), filepath)
     return "File not found", 404
 
+# Chat endpoints (legacy and api)
 def extract_message_from_request(req_json: dict) -> str:
     if not req_json:
         return ""
     return req_json.get("message", "") or req_json.get("q", "") or ""
+
 @app.route("/chat", methods=["POST"])
 @app.route("/api/chat", methods=["POST"])
 def chat_endpoint():
-    import difflib
-
     data = request.get_json(force=True, silent=True)
     if not data:
         return jsonify({"reply": "Invalid request"}), 400
@@ -868,128 +883,36 @@ def chat_endpoint():
         return jsonify({"reply": "Please send a non-empty message."}), 400
 
     try:
+        # ensure model manager created
         loop.run_until_complete(init_model_manager())
-        lower_msg = message.lower()
-        faculty_data = load_json_safely(FACULTY_JSON_PATH)
-
-        clean_msg = re.sub(r'[^a-z\s]', '', lower_msg)
-        clean_msg = re.sub(r'\b(dr|engr|mr|ms|mrs|prof|sir|maam|miss)\b', '', clean_msg).strip()
-
-        faculty_found = None
-        best_score = 0
-        is_about_person = any(
-            phrase in clean_msg
-            for phrase in [
-                "who is", "tell me about", "what is", "give info on",
-                "can you tell me about", "introduce", "role of", "information about"
-            ]
-        )
-
-        # --- Smart fuzzy matching ---
-        for key, info in faculty_data.items():
-            name_clean = info["name"].lower()
-            name_clean = re.sub(r'[^a-z\s]', '', name_clean)
-            name_clean = re.sub(r'\b(dr|engr|mr|ms|mrs|prof)\b', '', name_clean)
-            name_clean = re.sub(r'\b[a-z]\b(?=\s[a-z])', '', name_clean)
-
-            msg_clean = re.sub(r'\b[a-z]\b(?=\s[a-z])', '', clean_msg)
-
-            name_tokens = set(name_clean.split())
-            msg_tokens = set(msg_clean.split())
-
-            overlap = len(name_tokens & msg_tokens)
-            ratio = difflib.SequenceMatcher(None, name_clean, msg_clean).ratio()
-            last_name = name_clean.split()[-1] if name_clean.split() else ""
-
-            if (
-                overlap >= 2
-                or ratio > 0.75
-                or last_name in msg_clean
-                or any(tok in name_clean for tok in msg_tokens if len(tok) > 3)
-            ):
-                if overlap + ratio > best_score:
-                    best_score = overlap + ratio
-                    faculty_found = info
-
-        if faculty_found:
-            desc = faculty_found.get("description", "No description available.")
-            edu = ", ".join(faculty_found.get("education", []))
-            dept = faculty_found.get("department", "CICT")
-            title = faculty_found.get("title", "Faculty Member")
-
-            reply = (
-                f"{faculty_found['name']} is the {title} under the {dept} department. "
-                f"{desc} {'Educational background: ' + edu if edu else ''}"
-            )
-            if faculty_found.get("url"):
-                reply += f" Learn more here: {faculty_found['url']}"
-            return jsonify({"reply": reply, "sources": [{"source": "cict_faculty.json"}]})
-
-        # --- Role-based lookups ---
-        role_map = {
-            "dean": "Dean, College of Information and Communications Technology",
-            "associate dean": "Associate Dean, CICT",
-            "program chair": "Program Chair, BSIT",
-            "chair": "Program Chair, BSIT",
-            "coordinator": "Program Coordinator, WMAD/BA/SM"
-        }
-        for role_key, role_title in role_map.items():
-            if role_key in clean_msg:
-                for key, info in faculty_data.items():
-                    if role_title.lower() in info["title"].lower():
-                        desc = info.get("description", "No description available.")
-                        edu = ", ".join(info.get("education", []))
-                        dept = info.get("department", "CICT")
-                        reply = (
-                            f"{info['name']} is the {info['title']} under the {dept} department. "
-                            f"{desc} {'Educational background: ' + edu if edu else ''}"
-                        )
-                        if info.get("url"):
-                            reply += f" Learn more here: {info['url']}"
-                        return jsonify({"reply": reply, "sources": [{"source": "cict_faculty.json"}]})
-                    
-        if is_about_person:
-            return jsonify({"reply": "I couldn't find that faculty member in my records."})
         response, sources, model_name = loop.run_until_complete(model_manager.get_response(message))
         for src in sources:
             if "page" in src:
                 src["page"] = None
+# 🧹 Clean up citations and document mentions
         clean_response = re.sub(
             r'(\(?\s*(as\s+mentioned\s+in|according\s+to|based\s+on)\s+(the\s+)?(document|file|pdf)?[^.,)]*(\.pdf)?(,?\s*Page\s*\d+)?\)?[.,]?)',
             '',
             response,
             flags=re.IGNORECASE
         )
-        clean_response = re.sub(r'\s*\([^)]*\.pdf[^)]*\)', '', clean_response)
-        clean_response = re.sub(r',?\s*Page\s*\d+', '', clean_response)
-        clean_response = re.sub(r'【([^】]*),?\s*Page\s*\d+】', r'【\1】', clean_response)
-        clean_response = re.sub(r'\s{2,}', ' ', clean_response).strip()
+        clean_response = re.sub(r'\s*\([^)]*\.pdf[^)]*\)', '', clean_response)  # remove (…pdf…)
+        clean_response = re.sub(r',?\s*Page\s*\d+', '', clean_response)         # ✅ remove “, Page X”
+        clean_response = re.sub(r'【([^】]*),?\s*Page\s*\d+】', r'【\1】', clean_response)  # ✅ remove Page X inside 【…】
+        clean_response = re.sub(r'\s{2,}', ' ', clean_response).strip()         # remove double spaces
 
         cleaned_sources = [
             {**src, "source": re.sub(r',?\s*Page\s*\d+', '', src.get("source", ""))}
             for src in sources
         ]
-
         return jsonify({"reply": clean_response, "sources": cleaned_sources})
+
 
     except aiohttp.ClientConnectorError:
         return jsonify({"reply": "⚠️ Unable to connect to remote API. Running in offline mode."})
     except Exception as e:
         print(f"[ERROR] chat endpoint: {e}")
         return jsonify({"reply": "⚠️ An internal error occurred while processing your request."})
-
-@app.route("/crawl", methods=["GET"])
-def trigger_crawl():
-    async def run_crawler():
-        crawler = CICTWebCrawler(loop)
-        profiles, texts = await crawler.crawl_site()
-        data = {p[1]['name']: p[1] for p in profiles}
-        save_json_safely(FACULTY_JSON_PATH, data)
-        return f"✅ Crawl complete. Found {len(data)} faculty members."
-
-    asyncio.run(run_crawler())
-    return "Started crawling... check logs."
-    
 
 @app.route("/shutdown", methods=["POST"])
 def shutdown():
@@ -1010,6 +933,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"[WARN] init_model_manager error: {e}")
 
+    # Render sets PORT automatically; default to 5000 for local
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
 
