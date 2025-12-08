@@ -26,6 +26,8 @@ from langchain_community.vectorstores import FAISS as FAISS_local
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.prompts import PromptTemplate
 from langchain.schema import Document
+from dotenv import load_dotenv
+load_dotenv()
 
 # Optional PDF parsing: PyPDF2
 try:
